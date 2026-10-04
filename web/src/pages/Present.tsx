@@ -5,6 +5,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api/client';
 import type { LectureState, PollResults } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
+import { MathText } from '../components/MathText';
+import { Countdown } from '../components/Countdown';
 
 const TYPE_HINT: Record<string, string> = {
   single: 'выбор одного варианта',
@@ -106,29 +108,39 @@ export function PresentPage() {
 
   return (
     <div className="relative h-screen overflow-hidden bg-slate-950">
-      {/* Сцена: слайд всегда во всю ширину, вся высота экрана */}
+      {/* Сцена: размытый слайд заполняет фон (никаких пустых полос), поверх — чёткий слайд целиком */}
       <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-        {slide?.imageUrl ? (
+        {slide?.imageUrl && (
+          <img
+            src={slide.imageUrl}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="absolute inset-0 h-full w-full scale-110 select-none object-cover blur-2xl"
+          />
+        )}
+        {slide?.imageUrl && (
           <img
             src={slide.imageUrl}
             alt={`Слайд ${state.currentSlideIndex + 1}`}
-            className="w-full select-none"
+            className="absolute inset-0 h-full w-full select-none object-contain"
             draggable={false}
           />
-        ) : slide ? (
+        )}
+        {slide && !slide.imageUrl ? (
           <div className="max-w-3xl px-6 text-center">
             <div className="mb-2 text-sm uppercase tracking-widest text-sky-400">
               {poll ? TYPE_HINT[poll.type] : 'слайд-вопрос'}
             </div>
             <div className="text-3xl font-bold leading-snug text-white sm:text-5xl">
-              {poll ? poll.questionText : 'Слайд-вопрос без опроса'}
+              {poll ? <MathText text={poll.questionText} /> : 'Слайд-вопрос'}
             </div>
             {poll && (
               <ol className="mt-8 space-y-2 text-left text-xl text-slate-300">
                 {poll.options.map((o, i) => (
                   <li key={o.id} className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-2">
                     <span className="mr-2 font-mono text-sky-400">{i + 1}.</span>
-                    {o.text}
+                    <MathText text={o.text} />
                   </li>
                 ))}
               </ol>
@@ -138,13 +150,25 @@ export function PresentPage() {
           <div className="text-slate-500">Слайд недоступен</div>
         )}
 
-        {/* QR-код на слайде-вопросе: приподнимается над панелью управления, когда та видна */}
+        {/* QR-код на слайде-вопросе: приподнимается над панелью управления, когда та видна.
+            Над QR — обратный отсчёт для опросов с ограничением времени. */}
         {poll && (
           <div
             className={`absolute right-4 z-20 rounded-2xl bg-white p-3 shadow-2xl transition-all duration-300 ${
               panelVisible ? 'bottom-24' : 'bottom-4'
             }`}
           >
+            {poll.timeLimitSeconds != null && (state.secondsLeft ?? 0) > 0 && (
+              <div className="mb-2 rounded-xl bg-slate-900 px-3 py-1.5 text-center shadow">
+                <Countdown
+                  secondsLeft={state.secondsLeft ?? 0}
+                  className="text-2xl font-bold text-white"
+                />
+                <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                  до конца опроса
+                </div>
+              </div>
+            )}
             <QRCodeSVG value={state.voteUrl} size={222} level="M" />
             <div className="mt-1 text-center text-xs leading-tight text-slate-500">
               Наведите камеру
@@ -167,7 +191,7 @@ export function PresentPage() {
                   Результаты предыдущего вопроса
                 </div>
                 <h3 className="mb-4 text-lg font-bold text-slate-800">
-                  {pendingResultsQ.data.questionText}
+                  <MathText text={pendingResultsQ.data.questionText} />
                 </h3>
                 <ResultsView results={pendingResultsQ.data} />
                 <button className="btn-primary mt-5 w-full" onClick={() => void revealResults()}>

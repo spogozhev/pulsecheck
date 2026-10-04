@@ -1,4 +1,5 @@
 import type { PollResults } from '../api/types';
+import { MathText } from './MathText';
 
 const BAR_COLORS = [
   'bg-sky-500',
@@ -28,7 +29,9 @@ export function ResultsView({ results, compact = false }: { results: PollResults
       {sorted.map((o, i) => (
         <div key={o.id}>
           <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
-            <span className="truncate font-medium text-slate-800">{o.text}</span>
+            <span className="truncate font-medium text-slate-800">
+              <MathText text={o.text} />
+            </span>
             <span className="shrink-0 tabular-nums text-slate-500">
               {isRanking ? (
                 <>очки {o.points} · ср. место {o.avgRank !== null ? o.avgRank.toFixed(1) : '—'}</>

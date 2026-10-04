@@ -42,7 +42,7 @@ export function LoginPage() {
           <Logo size="lg" />
         </div>
         <div className="mb-4 text-center text-sm text-slate-500">
-          Опросы на лекциях по QR-коду
+          Опросы на лекциях
         </div>
         <form onSubmit={submit} className="space-y-3">
           {mode === 'register' && (

@@ -68,6 +68,8 @@ model Poll {
   questionText String   @map("question_text")
   type         String // single | multiple | ranking
   required     Boolean  @default(true)
+  // ограничение времени на прохождение в секундах; null — без ограничения
+  timeLimitSeconds Int?  @map("time_limit_seconds")
   createdAt    DateTime @default(now()) @map("created_at")
 
   options PollOption[]

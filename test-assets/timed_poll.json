@@ -1,0 +1,1 @@
+{"questionText": "Быстрый вопрос?", "type": "single", "required": true, "timeLimitSeconds": 5, "options": [{"text": "А"}, {"text": "Б"}]}

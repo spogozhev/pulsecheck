@@ -46,6 +46,7 @@ let PollsService = class PollsService {
                     questionText: dto.questionText.trim(),
                     type: dto.type,
                     required: dto.required ?? true,
+                    timeLimitSeconds: dto.timeLimitSeconds ?? null,
                     options: {
                         deleteMany: {},
                         create: dto.options.map((o, i) => ({ text: o.text.trim(), position: i })),
@@ -59,6 +60,7 @@ let PollsService = class PollsService {
                     questionText: dto.questionText.trim(),
                     type: dto.type,
                     required: dto.required ?? true,
+                    timeLimitSeconds: dto.timeLimitSeconds ?? null,
                     options: {
                         create: dto.options.map((o, i) => ({ text: o.text.trim(), position: i })),
                     },
@@ -110,6 +112,7 @@ let PollsService = class PollsService {
                 questionText: source.poll.questionText,
                 type: source.poll.type,
                 required: source.poll.required,
+                timeLimitSeconds: source.poll.timeLimitSeconds,
                 options: {
                     create: [...source.poll.options]
                         .sort((a, b) => a.position - b.position)

@@ -26,6 +26,7 @@ class SavePollDto {
     questionText;
     type;
     required;
+    timeLimitSeconds;
     options;
 }
 exports.SavePollDto = SavePollDto;
@@ -44,6 +45,13 @@ __decorate([
     (0, class_validator_1.IsBoolean)(),
     __metadata("design:type", Boolean)
 ], SavePollDto.prototype, "required", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(5),
+    (0, class_validator_1.Max)(3600),
+    __metadata("design:type", Number)
+], SavePollDto.prototype, "timeLimitSeconds", void 0);
 __decorate([
     (0, class_validator_1.IsArray)(),
     (0, class_validator_1.ArrayMinSize)(2),

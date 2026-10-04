@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { api } from '../api/client';
 import type { Analytics } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
+import { MathText } from '../components/MathText';
 
 const TYPE_RU: Record<string, string> = {
   single: 'один вариант',
@@ -105,7 +106,9 @@ export function LectureDetailPage() {
           {polls.map((p) => (
             <div key={p.pollId} className="card p-5">
               <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className="font-semibold text-slate-800">{p.questionText}</h3>
+                <h3 className="font-semibold text-slate-800">
+                  <MathText text={p.questionText} />
+                </h3>
                 <span className="text-xs text-slate-400">
                   слайд №{p.slideIndex + 1} · {TYPE_RU[p.type] ?? p.type}
                 </span>

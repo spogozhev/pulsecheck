@@ -182,7 +182,9 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .set(authHeaders())
       .send({ presentationId: process.env.TEST_PRESENTATION_ID, course: 'Интеграция' })
       .expect(201);
+    // код сессии короткий (4 символа) — для QR-ссылки
     const code = lecture.body.voteCode;
+    expect(code).toHaveLength(4);
 
     // страница студента: вопрос открыт
     const payload = await request(app.getHttpServer())
@@ -449,6 +451,87 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .expect(200);
     const originalSlide = original.body.slides.find((s: { id: string }) => s.id === source.id);
     expect(originalSlide.poll.questionText).toBe('Любимый формат лекций?');
+  });
+
+  it('опрос с ограничением времени закрывается автоматически', async () => {
+    // презентация big из теста выше: 25 слайдов без опросов
+    const list = await request(app.getHttpServer())
+      .get('/api/presentations?search=big')
+      .set(authHeaders())
+      .expect(200);
+    const pres = list.body.find((p: { title: string }) => p.title === 'big');
+    expect(pres).toBeTruthy();
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${pres.id}`)
+      .set(authHeaders())
+      .expect(200);
+    const slideId = detail.body.slides[0].id;
+
+    const poll = await request(app.getHttpServer())
+      .put(`/api/presentations/${pres.id}/slides/${slideId}/poll`)
+      .set(authHeaders())
+      .send({
+        questionText: 'Быстрый вопрос?',
+        type: 'single',
+        required: true,
+        timeLimitSeconds: 5,
+        options: [{ text: 'А' }, { text: 'Б' }],
+      })
+      .expect(200);
+    expect(poll.body.timeLimitSeconds).toBe(5);
+
+    const lecture = await request(app.getHttpServer())
+      .post('/api/lectures')
+      .set(authHeaders())
+      .send({ presentationId: pres.id })
+      .expect(201);
+    const { id: lectureId, voteCode: code } = lecture.body;
+
+    // пока опрос открыт: студент отвечает, состояние открыто
+    const anon = 'bbbbbbbb-cccc-4dddd-8eeee-ffffffffffff';
+    const payload = await request(app.getHttpServer())
+      .get(`/api/vote/${code}/0`)
+      .set('X-Anon-Id', anon)
+      .expect(200);
+    expect(payload.body.open).toBe(true);
+    const optionId = payload.body.question.options[0].id;
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', anon)
+      .send({ selectedOptionIds: [optionId] })
+      .expect(201);
+    const s1 = await request(app.getHttpServer()).get(`/api/vote/${code}`).expect(200);
+    expect(s1.body.questionOpen).toBe(true);
+
+    // ждём истечения лимита (5 с) с запасом
+    await new Promise((r) => setTimeout(r, 6500));
+
+    // вопрос закрыт по времени: голос отклоняется, итоги доступны, презентеру — к показу
+    const s2 = await request(app.getHttpServer()).get(`/api/vote/${code}`).expect(200);
+    expect(s2.body.questionOpen).toBe(false);
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', anon)
+      .send({ selectedOptionIds: [optionId] })
+      .expect(409);
+    const results = await request(app.getHttpServer())
+      .get(`/api/vote/${code}/0/results`)
+      .set('X-Anon-Id', anon)
+      .expect(200);
+    expect(results.body.closed).toBe(true);
+    expect(results.body.results.totalResponses).toBe(1);
+
+    const state = await request(app.getHttpServer())
+      .get(`/api/lectures/${lectureId}/state`)
+      .set(authHeaders())
+      .expect(200);
+    expect(state.body.pendingResults).toMatchObject({ slideIndex: 0, pollId: poll.body.id });
+
+    await request(app.getHttpServer())
+      .post(`/api/lectures/${lectureId}/finish`)
+      .set(authHeaders())
+      .expect(201);
   });
 });
 

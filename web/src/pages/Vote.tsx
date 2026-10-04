@@ -5,6 +5,8 @@ import { api } from '../api/client';
 import type { VotePayload, VoteResultsResponse } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
 import { Logo } from '../components/Logo';
+import { MathText } from '../components/MathText';
+import { Countdown } from '../components/Countdown';
 
 function anonId(): string {
   let v = localStorage.getItem('anon_id');
@@ -26,6 +28,8 @@ interface SessionState {
   active: boolean;
   slideIndex: number;
   hasPoll: boolean;
+  /** Активный вопрос открыт (лекция идёт, слайд текущий, время не истекло) */
+  questionOpen: boolean;
   /** true — преподаватель показал итоги предыдущего вопроса (или истёк таймаут 10 с) */
   revealed: boolean;
 }
@@ -54,7 +58,18 @@ export function VotePage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.active && session.hasPoll && session.slideIndex !== viewSlide) {
+    if (session.active && session.hasPoll && session.slideIndex === viewSlide) {
+      // тот же вопрос
+      if (resultsMode && session.revealed && session.questionOpen) {
+        // открыли заново — разрешаем (пере)ответить
+        setResultsMode(false);
+        setSubmitted(false);
+      } else if (!resultsMode && !session.questionOpen) {
+        // время вышло / вопрос закрыт — показываем итоги
+        setResultsMode(true);
+        setSubmitted(false);
+      }
+    } else if (session.active && session.hasPoll && session.slideIndex !== viewSlide) {
       // Вопрос закрыт, активен другой слайд. При движении вперёд студент сначала видит итоги
       // своего последнего вопроса, а новый вопрос открывается, когда преподаватель показал
       // его на экране (кнопка «Продолжить показ»; без нажатия — автоматически через 10 секунд).
@@ -125,13 +140,6 @@ export function VotePage() {
     onSuccess: () => setSubmitted(true),
   });
 
-  const canSubmit = (() => {
-    if (!question) return false;
-    if (question.type === 'ranking')
-      return question.required ? ranking.length === question.options.length : true;
-    return question.required ? selected.length > 0 : true;
-  })();
-
   const toggle = (id: string) => {
     if (question?.type === 'single') {
       setSelected([id]);
@@ -181,7 +189,9 @@ export function VotePage() {
     const results = resultsQ.data.results;
     return (
       <Shell lectureTitle={session!.lectureTitle}>
-        <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">{results.questionText}</h1>
+        <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">
+          <MathText text={results.questionText} />
+        </h1>
         <div className="mb-4 text-xs font-semibold uppercase tracking-wider text-emerald-600">
           Голосование завершено · итоги
         </div>
@@ -233,6 +243,18 @@ export function VotePage() {
   }
 
   const payload = payloadQ.data;
+
+  /** Время на ответ истекло (для опросов с ограничением) */
+  const timeExpired =
+    question != null && question.timeLimitSeconds != null && (question.secondsLeft ?? 1) <= 0;
+
+  const canSubmit = (() => {
+    if (!question || timeExpired) return false;
+    if (question.type === 'ranking')
+      return question.required ? ranking.length === question.options.length : true;
+    return question.required ? selected.length > 0 : true;
+  })();
+
   if (!question) {
     return (
       <Shell lectureTitle={session!.lectureTitle}>
@@ -263,9 +285,12 @@ export function VotePage() {
   if (!payload.open) {
     return (
       <Shell lectureTitle={session!.lectureTitle}>
-        <div className="py-10 text-center text-slate-400">
+        <div className="py-10 text-center">
           <div className="mb-3 text-4xl">⏳</div>
-          Вопрос закрыт, загружаем итоги…
+          <div className="font-medium text-slate-700">Вопрос сейчас не активен</div>
+          <div className="mt-1 text-sm text-slate-400">
+            Дождитесь следующего вопроса — он откроется автоматически
+          </div>
         </div>
       </Shell>
     );
@@ -274,11 +299,21 @@ export function VotePage() {
   // Форма активного вопроса
   return (
     <Shell lectureTitle={session!.lectureTitle}>
-      <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">{question.questionText}</h1>
+      <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">
+        <MathText text={question.questionText} />
+      </h1>
       <div className="mb-4 text-sm text-slate-500">
         {TYPE_LABEL[question.type]}
         {!question.required && ' · можно пропустить'}
       </div>
+
+      {question.timeLimitSeconds != null && question.secondsLeft != null && (
+        <div className="mb-4 flex justify-center">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-5 py-1 text-xl font-bold text-slate-800">
+            <Countdown secondsLeft={question.secondsLeft} />
+          </span>
+        </div>
+      )}
 
       <div className="space-y-2">
         {question.options.map((o) => {
@@ -314,7 +349,9 @@ export function VotePage() {
                   {active && <span className="text-xs">✓</span>}
                 </span>
               )}
-              <span className="flex-1">{o.text}</span>
+              <span className="flex-1">
+                <MathText text={o.text} />
+              </span>
             </button>
           );
         })}
@@ -336,6 +373,7 @@ export function VotePage() {
         <button
           className="btn-primary flex-1 py-3 text-base"
           disabled={!canSubmit || submit.isPending}
+          title={timeExpired ? 'Время на ответ истекло' : undefined}
           onClick={() =>
             submit.mutate({
               selectedOptionIds: question.type === 'ranking' ? [] : selected,
@@ -343,7 +381,7 @@ export function VotePage() {
             })
           }
         >
-          {submit.isPending ? 'Отправка…' : 'Отправить ответ'}
+          {timeExpired ? 'Время вышло' : submit.isPending ? 'Отправка…' : 'Отправить ответ'}
         </button>
         {!question.required && (
           <button

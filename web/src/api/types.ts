@@ -32,6 +32,7 @@ export interface Poll {
   questionText: string;
   type: PollType;
   required: boolean;
+  timeLimitSeconds: number | null;
   options: PollOption[];
 }
 
@@ -121,13 +122,14 @@ export interface LectureState {
   startedAt: string;
   answersTotal: number;
   pendingResults: { slideIndex: number; pollId: string } | null;
+  secondsLeft: number | null;
   presentation: { id: string; title: string };
   slide: {
     index: number;
     hasImage: boolean;
     imageUrl: string | null;
     isGenerated: boolean;
-    poll: LectureStatePoll | null;
+    poll: (LectureStatePoll & { timeLimitSeconds: number | null }) | null;
   } | null;
 }
 
@@ -139,6 +141,8 @@ export interface VotePayload {
     type: PollType;
     required: boolean;
     questionText: string;
+    timeLimitSeconds: number | null;
+    secondsLeft: number | null;
     options: PollOption[];
   } | null;
   yourAnswer: { selectedOptionIds: string[]; rankingOrder: string[] } | null;

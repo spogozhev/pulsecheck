@@ -5,6 +5,7 @@ export interface PollDraft {
   questionText: string;
   type: PollType;
   required: boolean;
+  timeLimitSeconds: number | null;
   options: { text: string }[];
 }
 
@@ -45,22 +46,22 @@ export function PollBuilder({
 }) {
   const [questionText, setQuestionText] = useState('');
   const [type, setType] = useState<PollType>('single');
-  const [required, setRequired] = useState(true);
   const [options, setOptions] = useState<string[]>(['', '']);
   const [copyFromId, setCopyFromId] = useState<string | null>(null);
+  const [timeLimit, setTimeLimit] = useState('');
 
   useEffect(() => {
     const poll: Poll | null = slide.poll;
     if (poll) {
       setQuestionText(poll.questionText);
       setType(poll.type);
-      setRequired(poll.required);
       setOptions([...poll.options].sort((a, b) => a.position - b.position).map((o) => o.text));
+      setTimeLimit(poll.timeLimitSeconds != null ? String(poll.timeLimitSeconds) : '');
     } else {
       setQuestionText('');
       setType('single');
-      setRequired(true);
       setOptions(['', '']);
+      setTimeLimit('');
     }
   }, [slide.id, slide.poll]);
 
@@ -77,10 +78,15 @@ export function PollBuilder({
     });
   };
 
+  const timeLimitNum = timeLimit.trim() === '' ? null : Number(timeLimit);
+  const timeLimitValid =
+    timeLimitNum === null || (Number.isInteger(timeLimitNum) && timeLimitNum >= 5 && timeLimitNum <= 3600);
+
   const valid =
     questionText.trim().length >= 3 &&
     options.filter((o) => o.trim()).length >= 2 &&
-    options.every((o) => o.trim() === '' || o.trim().length > 0);
+    options.every((o) => o.trim() === '' || o.trim().length > 0) &&
+    timeLimitValid;
 
   return (
     <div className="space-y-4">
@@ -123,6 +129,10 @@ export function PollBuilder({
           placeholder="Например: Какой язык вы используете чаще всего?"
           onChange={(e) => setQuestionText(e.target.value)}
         />
+        <div className="mt-1 text-xs text-slate-400">
+          Формулы заключайте в знаки доллара, например:{' '}
+          <code className="rounded bg-slate-100 px-1">$x^2-2x+1=0$</code>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -136,16 +146,23 @@ export function PollBuilder({
             ))}
           </select>
         </div>
-        <div className="flex items-end">
-          <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-sky-600"
-              checked={required}
-              onChange={(e) => setRequired(e.target.checked)}
-            />
-            Ответ обязателен
-          </label>
+        <div>
+          <label className="label">Ограничение времени (секунды)</label>
+          <input
+            className="input"
+            inputMode="numeric"
+            value={timeLimit}
+            maxLength={4}
+            placeholder="Без ограничения"
+            onChange={(e) => setTimeLimit(e.target.value.replace(/[^0-9]/g, ''))}
+          />
+          {timeLimitValid ? (
+            <div className="mt-1 text-xs text-slate-400">
+              Пусто — без ограничения
+            </div>
+          ) : (
+            <div className="mt-1 text-xs text-rose-600">От 5 до 3600 секунд</div>
+          )}
         </div>
       </div>
 
@@ -223,7 +240,8 @@ export function PollBuilder({
             onSave({
               questionText: questionText.trim(),
               type,
-              required,
+              required: true,
+              timeLimitSeconds: timeLimitNum,
               options: options.filter((o) => o.trim()).map((o) => ({ text: o.trim() })),
             })
           }

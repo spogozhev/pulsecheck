@@ -5,9 +5,12 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -31,6 +34,13 @@ export class SavePollDto {
   @IsOptional()
   @IsBoolean()
   required?: boolean;
+
+  /** Ограничение времени на прохождение в секундах (5–3600); null/undefined — без ограничения */
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(3600)
+  timeLimitSeconds?: number;
 
   @IsArray()
   @ArrayMinSize(2)

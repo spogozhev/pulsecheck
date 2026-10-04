@@ -135,10 +135,18 @@ export class LecturesService {
   /** Текущее состояние лекции для presenter view (поллинг каждые 2-3 с). */
   async state(id: string, user: AuthUser) {
     const lecture = await this.getOwned(id, user);
-    const slide = await this.prisma.slide.findFirst({
+    let slide = await this.prisma.slide.findFirst({
       where: { presentationId: lecture.presentationId, index: lecture.currentSlideIndex },
       include: { poll: { include: { options: { orderBy: { position: 'asc' } } } } },
     });
+    // Слайд удалили уже после лекции — показываем ближайший существующий перед ним
+    if (!slide && lecture.currentSlideIndex > 0) {
+      slide = await this.prisma.slide.findFirst({
+        where: { presentationId: lecture.presentationId, index: { lt: lecture.currentSlideIndex } },
+        orderBy: { index: 'desc' },
+        include: { poll: { include: { options: { orderBy: { position: 'asc' } } } } },
+      });
+    }
 
     let votedCount = 0;
     let pollPayload: unknown = null;
@@ -151,6 +159,7 @@ export class LecturesService {
         type: slide.poll.type,
         questionText: slide.poll.questionText,
         required: slide.poll.required,
+        timeLimitSeconds: slide.poll.timeLimitSeconds,
         options: slide.poll.options.map((o) => ({ id: o.id, text: o.text, position: o.position })),
         votedCount,
       };
@@ -160,7 +169,7 @@ export class LecturesService {
 
     // Итоги предыдущего вопроса ожидают показа: ушли вперёд со слайда с ответами,
     // преподаватель ещё не нажимал «Продолжить показ» и не переходил дальше
-    const pendingSlide =
+    let pendingSlide =
       lecture.pendingRevealSlideIndex !== null && lecture.resultsRevealedAt === null
         ? await this.prisma.slide.findFirst({
             where: {
@@ -170,8 +179,30 @@ export class LecturesService {
             include: { poll: { select: { id: true } } },
           })
         : null;
+
+    // Опрос текущего слайда с ограничением времени: время вышло — итоги ожидают показа
+    if (
+      !pendingSlide &&
+      slide?.poll?.timeLimitSeconds &&
+      lecture.status === 'active' &&
+      lecture.resultsRevealedAt === null &&
+      Date.now() - lecture.slideChangedAt.getTime() > slide.poll.timeLimitSeconds * 1000
+    ) {
+      pendingSlide = slide;
+    }
     const pendingResults =
       pendingSlide?.poll ? { slideIndex: pendingSlide.index, pollId: pendingSlide.poll.id } : null;
+
+    // Обратный отсчёт текущего опроса (для презентера)
+    let secondsLeft: number | null = null;
+    if (slide?.poll?.timeLimitSeconds && lecture.status === 'active') {
+      secondsLeft = Math.max(
+        0,
+        Math.ceil(
+          (slide.poll.timeLimitSeconds * 1000 - (Date.now() - lecture.slideChangedAt.getTime())) / 1000,
+        ),
+      );
+    }
 
     return {
       id: lecture.id,
@@ -186,6 +217,7 @@ export class LecturesService {
       startedAt: lecture.startedAt,
       answersTotal,
       pendingResults,
+      secondsLeft,
       presentation: { id: lecture.presentationId, title: lecture.presentation.title },
       slide: slide
         ? {
@@ -396,11 +428,13 @@ export class LecturesService {
   }
 
   private async generateVoteCode(): Promise<string> {
-    for (let attempt = 0; attempt < 10; attempt++) {
+    // Короткий код для QR-ссылки (4 символа, ~920 тыс. комбинаций);
+    // при коллизии (код уже занят) генерация повторяется
+    for (let attempt = 0; attempt < 20; attempt++) {
       const bytes = randomBytes(8);
       let code = '';
       for (const b of bytes) code += VOTE_CODE_ALPHABET[b % VOTE_CODE_ALPHABET.length];
-      code = code.slice(0, 8);
+      code = code.slice(0, 4);
       const exists = await this.prisma.lecture.findUnique({ where: { voteCode: code } });
       if (!exists) return code;
     }

@@ -31,7 +31,7 @@ let VoteService = class VoteService {
             throw new common_1.NotFoundException('Сессия не найдена');
         const slide = await this.prisma.slide.findFirst({
             where: { presentationId: lecture.presentationId, index: lecture.currentSlideIndex },
-            include: { poll: { select: { id: true } } },
+            include: { poll: { select: { id: true, timeLimitSeconds: true } } },
         });
         const revealed = lecture.resultsRevealedAt !== null;
         return {
@@ -39,13 +39,22 @@ let VoteService = class VoteService {
             active: lecture.status === 'active',
             slideIndex: lecture.currentSlideIndex,
             hasPoll: !!slide?.poll,
+            questionOpen: !!slide?.poll && this.isPollOpen(lecture, slide),
             revealed,
         };
+    }
+    isPollOpen(lecture, slide) {
+        if (lecture.status !== 'active' || lecture.currentSlideIndex !== slide.index || !slide.poll) {
+            return false;
+        }
+        if (!slide.poll.timeLimitSeconds)
+            return true;
+        return (Date.now() - lecture.slideChangedAt.getTime() <= slide.poll.timeLimitSeconds * 1000);
     }
     async payload(code, slideIndex, req, res) {
         const { lecture, slide } = await this.resolve(code, slideIndex);
         const anonId = this.ensureAnon(req, res);
-        const open = this.isOpen(lecture, slideIndex);
+        const open = this.isOpen(lecture, slideIndex) && !this.isTimeExpired(lecture, slideIndex, slide);
         const poll = slide.poll;
         let yourAnswer = null;
         if (poll) {
@@ -69,6 +78,8 @@ let VoteService = class VoteService {
                     type: poll.type,
                     required: poll.required,
                     questionText: poll.questionText,
+                    timeLimitSeconds: poll.timeLimitSeconds,
+                    secondsLeft: open && poll.timeLimitSeconds ? this.secondsLeft(lecture, poll.timeLimitSeconds) : null,
                     options: [...poll.options]
                         .sort((a, b) => a.position - b.position)
                         .map((o) => ({ id: o.id, text: o.text, position: o.position })),
@@ -85,6 +96,9 @@ let VoteService = class VoteService {
             throw new common_1.NotFoundException('На этом слайде нет вопроса');
         if (!this.isOpen(lecture, slideIndex)) {
             throw new common_1.HttpException('Голосование по этому вопросу закрыто', common_1.HttpStatus.CONFLICT);
+        }
+        if (this.isTimeExpired(lecture, slideIndex, slide)) {
+            throw new common_1.HttpException('Время на прохождение опроса истекло', common_1.HttpStatus.CONFLICT);
         }
         (0, vote_logic_1.validateAnswerPayload)({ type: poll.type, required: poll.required, optionIds: poll.options.map((o) => o.id) }, dto);
         const pseudonym = this.pseudonymFor(lecture, poll, anonId);
@@ -107,7 +121,7 @@ let VoteService = class VoteService {
         const { lecture, slide } = await this.resolve(code, slideIndex);
         if (!slide.poll)
             throw new common_1.NotFoundException('На этом слайде нет вопроса');
-        if (!this.isClosed(lecture, slideIndex))
+        if (!this.isClosed(lecture, slideIndex, slide))
             return { closed: false };
         const answers = await this.prisma.answer.findMany({
             where: { lectureId: lecture.id, pollId: slide.poll.id },
@@ -117,7 +131,19 @@ let VoteService = class VoteService {
     isOpen(lecture, slideIndex) {
         return lecture.status === 'active' && lecture.currentSlideIndex === slideIndex;
     }
-    isClosed(lecture, slideIndex) {
+    secondsLeft(lecture, timeLimitSeconds) {
+        const elapsed = Date.now() - lecture.slideChangedAt.getTime();
+        return Math.max(0, Math.ceil(timeLimitSeconds - elapsed / 1000));
+    }
+    isTimeExpired(lecture, slideIndex, slide) {
+        return (lecture.currentSlideIndex === slideIndex &&
+            !!slide.poll?.timeLimitSeconds &&
+            this.secondsLeft(lecture, slide.poll.timeLimitSeconds) <= 0);
+    }
+    isClosed(lecture, slideIndex, slide) {
+        return this.isClosedBasic(lecture, slideIndex) || this.isTimeExpired(lecture, slideIndex, slide);
+    }
+    isClosedBasic(lecture, slideIndex) {
         return lecture.status !== 'active' || lecture.currentSlideIndex > slideIndex;
     }
     async resolve(code, slideIndex) {
