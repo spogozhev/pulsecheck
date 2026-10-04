@@ -1,5 +1,4 @@
 import {
-  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -24,10 +23,6 @@ export class StartLectureDto {
   @IsString()
   @MaxLength(200)
   course?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  linkAnswers?: boolean;
 }
 
 export class SetSlideDto {

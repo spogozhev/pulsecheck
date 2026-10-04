@@ -71,7 +71,8 @@ export class LecturesService {
         presentationId: presentation.id,
         title: dto.title?.trim() || presentation.title,
         course: dto.course?.trim() || null,
-        linkAnswers: dto.linkAnswers ?? true,
+        // связывание ответов одного студента между вопросами — всегда включено (§3.2 ТЗ)
+        linkAnswers: true,
         slideCount: presentation.slideCount,
         currentSlideIndex: 0,
         voteCode: await this.generateVoteCode(),

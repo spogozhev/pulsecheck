@@ -19,7 +19,6 @@ export function PresentationDetailPage() {
   const [copyOpen, setCopyOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [launchCourse, setLaunchCourse] = useState('');
-  const [launchLink, setLaunchLink] = useState(true);
 
   const presQ = useQuery({
     queryKey: ['pres', id],
@@ -53,7 +52,6 @@ export function PresentationDetailPage() {
       api.post<Lecture>('/api/lectures', {
         presentationId: id,
         course: launchCourse.trim() || undefined,
-        linkAnswers: launchLink,
       }),
     onSuccess: (lecture) => navigate(`/present/${lecture.id}`),
     onError: fail,
@@ -165,15 +163,6 @@ export function PresentationDetailPage() {
             onChange={(e) => setLaunchCourse(e.target.value)}
           />
         </div>
-        <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-sky-600"
-            checked={launchLink}
-            onChange={(e) => setLaunchLink(e.target.checked)}
-          />
-          Связывать ответы одного студента между вопросами
-        </label>
         <button
           className="btn-primary ml-auto"
           disabled={!ready || launch.isPending || notApproved}
