@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import Redis from 'ioredis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { APP_VERSION } from '../../app.version';
 
 @ApiTags('Мониторинг')
 @Controller('health')
@@ -30,6 +31,6 @@ export class HealthController {
 
     const ok = db && redis;
     if (!ok) throw new ServiceUnavailableException({ statusCode: 503, ok, db, redis });
-    return { ok: true, db, redis };
+    return { ok: true, db, redis, version: APP_VERSION };
   }
 }

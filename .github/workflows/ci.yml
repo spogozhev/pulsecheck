@@ -1,9 +1,11 @@
 name: CI
 
+# Проверки: на каждый PR в master и на каждый push в master (после влития)
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
+    branches: [master]
 
 jobs:
   test:

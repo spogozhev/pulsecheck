@@ -93,6 +93,30 @@ npm run dev          # API на :3001 (nest watch), веб на :5180 (vite)
 опрос с ограничением времени, сценарий модерации, профиль и восстановление пароля. Тесты используют
 отдельную БД `slide_hz_test` и Redis db 1, dev-данные не затрагиваются.
 
+## Версионирование и рабочий процесс
+
+Версия — [SemVer](https://semver.org/lang/ru/) `MAJOR.MINOR.PATCH`, единая для всего монорепо.
+Текущая версия живёт в корневом `package.json`, видна в интерфейсе (сайдбар) и в `/api/health`;
+каждая версия помечается git-тегом `vX.Y.Z` в момент релиза.
+
+**Рабочий процесс:**
+
+1. Фича или исправление разрабатывается в отдельной ветке от `master`:
+   `git checkout -b feat/my-feature master`
+2. `Pull Request` в `master`. Влитие — только после зелёного CI (сборка + все тесты);
+   в GitHub для ветки `master` включите защиту: Settings → Branches → Add rule →
+   Require a pull request + Require status checks (`CI / test`).
+3. После влития обновите версию **в master** в зависимости от содержания:
+   - исправление → `npm run release patch`  (0.1.0 → 0.1.1)
+   - новая фича → `npm run release minor`   (0.1.0 → 0.2.0)
+   - ломающее изменение → `npm run release major` (0.1.0 → 1.0.0)
+
+   Скрипт сам поднимет версию во всех `package.json`, закоммитит `chore(release): vX.Y.Z`
+   и поставит тег. Останется `git push && git push --tags`.
+
+Тесты: `npm test` (см. раздел «Тесты»), сборка: `npm run build`. Шаблон описания PR —
+`.github/pull_request_template.md`.
+
 ## Конфигурация
 
 Все переменные — в `server/.env` (шаблон с комментариями: `server/.env.example`):

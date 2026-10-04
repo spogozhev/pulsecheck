@@ -46,6 +46,9 @@ export function Layout({ children }: { children: ReactNode }) {
           >
             Выйти
           </button>
+          <div className="mt-2 px-3 text-center text-[10px] text-slate-300">
+            PulseCheck v{__APP_VERSION__}
+          </div>
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-6">
