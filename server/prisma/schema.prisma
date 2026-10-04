@@ -31,6 +31,7 @@ model Presentation {
   teacherId   String   @map("teacher_id")
   teacher     User     @relation(fields: [teacherId], references: [id])
   title       String
+  course      String? // курс/дисциплина — тег для фильтрации на странице презентаций
   sourceType  String   @map("source_type") // pdf | pptx
   originalPath String? @map("original_path")
   status      String   @default("processing") // processing | ready | failed
@@ -42,6 +43,7 @@ model Presentation {
   lectures Lecture[]
 
   @@index([teacherId])
+  @@index([teacherId, course])
   @@map("presentations")
 }
 

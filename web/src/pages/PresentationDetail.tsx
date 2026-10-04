@@ -47,6 +47,15 @@ export function PresentationDetailPage() {
     onError: fail,
   });
 
+  const saveCourse = useMutation({
+    mutationFn: (course: string) => api.patch(`/api/presentations/${id}`, { course }),
+    onSuccess: () => {
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ['presentationTags'] });
+    },
+    onError: fail,
+  });
+
   const launch = useMutation({
     mutationFn: () =>
       api.post<Lecture>('/api/lectures', {
@@ -117,15 +126,30 @@ export function PresentationDetailPage() {
   return (
     <div className="mx-auto max-w-6xl">
       {/* Шапка */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          className="input max-w-md text-lg font-semibold"
-          defaultValue={pres.title}
-          onBlur={(e) => {
-            const v = e.target.value.trim();
-            if (v && v !== pres.title) rename.mutate(v);
-          }}
-        />
+      <div className="mb-4 flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <input
+            className="input text-lg font-semibold"
+            defaultValue={pres.title}
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v && v !== pres.title) rename.mutate(v);
+            }}
+          />
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className="text-sm text-slate-500">#</span>
+            <input
+              className="input max-w-xs py-1 text-sm"
+              defaultValue={pres.course ?? ''}
+              maxLength={100}
+              placeholder="Курс/дисциплина — тег для фильтра (например: Алгоритмы)"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (pres.course ?? '')) saveCourse.mutate(v);
+              }}
+            />
+          </div>
+        </div>
         {pres.status === 'processing' && (
           <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">⏳ Обработка…</span>
         )}
@@ -157,7 +181,7 @@ export function PresentationDetailPage() {
         <div>
           <label className="label">Курс/дисциплина (для истории)</label>
           <input
-            className="input w-56"
+            className="input w-112"
             value={launchCourse}
             placeholder="Например: Алгоритмы"
             onChange={(e) => setLaunchCourse(e.target.value)}

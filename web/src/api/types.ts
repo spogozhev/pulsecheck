@@ -49,6 +49,7 @@ export type PresentationStatus = 'processing' | 'ready' | 'failed';
 export interface Presentation {
   id: string;
   title: string;
+  course: string | null;
   sourceType: 'pdf' | 'pptx';
   status: PresentationStatus;
   error?: string | null;

@@ -1,14 +1,13 @@
-node_modules/
-dist/
-build/
+node_modules
+/.next/
+/out/
+/build
+/dist
 coverage/
 *.tsbuildinfo
 
 # env
-.env
-.env.local
-*.env
-!.env.example
+.env*
 
 # runtime data
 storage/
@@ -25,3 +24,22 @@ dev.out.log
 prompt
 PROMPT.md
 AGENTS.md
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+.zscripts
+*.bak
+*.log
+dev.log
+dev.out.log
+server.log
+test
+
+prompt
+PROMPT.md
+AGENTS.md
+

@@ -68,17 +68,44 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .expect(403);
   });
 
-  it('загрузка PDF → конвертация в слайды', async () => {
+  it('загрузка PDF → конвертация в слайды; курс-тег и фильтры', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/presentations')
       .set(authHeaders())
       .field('title', 'Интеграционный тест')
+      .field('course', 'Интеграция')
       .attach('file', minimalPdf(['Slide one', 'Slide two']), {
         filename: 'test.pdf',
         contentType: 'application/pdf',
       })
       .expect(201);
     expect(res.body.status).toBe('processing');
+    expect(res.body.course).toBe('Интеграция');
+
+    // теги и фильтры по курсу
+    const tags = await request(app.getHttpServer())
+      .get('/api/presentations/tags')
+      .set(authHeaders())
+      .expect(200);
+    expect(tags.body).toContain('Интеграция');
+
+    const filtered = await request(app.getHttpServer())
+      .get('/api/presentations?course=Интеграция')
+      .set(authHeaders())
+      .expect(200);
+    expect(filtered.body.some((p: { title: string }) => p.title === 'Интеграционный тест')).toBe(true);
+
+    const bySearch = await request(app.getHttpServer())
+      .get('/api/presentations?search=интеграци')
+      .set(authHeaders())
+      .expect(200);
+    expect(bySearch.body.some((p: { title: string }) => p.title === 'Интеграционный тест')).toBe(true);
+
+    const other = await request(app.getHttpServer())
+      .get('/api/presentations?course=Несуществующий курс')
+      .set(authHeaders())
+      .expect(200);
+    expect(other.body.some((p: { title: string }) => p.title === 'Интеграционный тест')).toBe(false);
 
     let presentation = res.body;
     for (let i = 0; i < 40 && presentation.status === 'processing'; i++) {
@@ -92,6 +119,18 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
     expect(presentation.status).toBe('ready');
     expect(presentation.slideCount).toBe(2);
     expect(presentation.slides[0].imagePath).toMatch(/\.png$/);
+
+    // обновление свойств: смена курса и очистка
+    await request(app.getHttpServer())
+      .patch(`/api/presentations/${presentation.id}`)
+      .set(authHeaders())
+      .send({ course: 'Другая дисциплина' })
+      .expect(200);
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${presentation.id}`)
+      .set(authHeaders())
+      .expect(200);
+    expect(detail.body.course).toBe('Другая дисциплина');
   });
 
   it('создание опроса на слайде (single) и валидация вариантов', async () => {

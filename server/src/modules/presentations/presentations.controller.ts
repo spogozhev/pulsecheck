@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -14,17 +15,36 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditService } from '../audit/audit.service';
 import { PresentationsService } from './presentations.service';
 import { PortableService } from './portable.service';
 
 class UpdatePresentationDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(200)
-  title!: string;
+  title?: string;
+
+  /** Курс/дисциплина — тег; пустая строка очищает значение */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  course?: string;
+}
+
+class PresentationFilterDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  course?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }
 
 @ApiTags('Презентации')
@@ -44,6 +64,7 @@ export class PresentationsController {
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('title') title: unknown,
+    @Body('course') course: unknown,
     @CurrentUser() user: AuthUser,
     @Req() req: Request,
   ) {
@@ -51,6 +72,7 @@ export class PresentationsController {
       file,
       typeof title === 'string' ? title : undefined,
       user,
+      typeof course === 'string' ? course : undefined,
     );
     void this.audit.log(req, 'presentation.upload', {
       entityType: 'presentation',
@@ -61,9 +83,15 @@ export class PresentationsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Список презентаций преподавателя' })
-  async list(@CurrentUser() user: AuthUser) {
-    return this.presentations.list(user);
+  @ApiOperation({ summary: 'Список презентаций (фильтры: course — точный тег, search — по названию/курсу)' })
+  async list(@Query() filters: PresentationFilterDto, @CurrentUser() user: AuthUser) {
+    return this.presentations.list(user, filters);
+  }
+
+  @Get('tags')
+  @ApiOperation({ summary: 'Различные курсы/дисциплины преподавателя (теги для фильтрации)' })
+  async tags(@CurrentUser() user: AuthUser) {
+    return this.presentations.listTags(user);
   }
 
   @Get(':id')
@@ -73,13 +101,13 @@ export class PresentationsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Переименование' })
+  @ApiOperation({ summary: 'Обновить свойства: название и/или курс-дисциплину (пустой course очищает)' })
   async update(
     @Param('id') id: string,
     @Body() dto: UpdatePresentationDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.presentations.updateTitle(id, dto.title, user);
+    return this.presentations.updateProperties(id, user, dto);
   }
 
   @Delete(':id')

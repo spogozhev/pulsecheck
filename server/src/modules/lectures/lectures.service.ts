@@ -70,7 +70,8 @@ export class LecturesService {
         teacherId: user.id,
         presentationId: presentation.id,
         title: dto.title?.trim() || presentation.title,
-        course: dto.course?.trim() || null,
+        // курс лекции наследуется от презентации, если не указан явно при запуске
+        course: dto.course?.trim() || presentation.course || null,
         // связывание ответов одного студента между вопросами — всегда включено (§3.2 ТЗ)
         linkAnswers: true,
         slideCount: presentation.slideCount,

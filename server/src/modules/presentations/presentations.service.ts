@@ -11,6 +11,7 @@ import { Queue } from 'bullmq';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { CONVERSION_QUEUE } from './conversion.constants';
@@ -35,7 +36,12 @@ export class PresentationsService {
     @InjectQueue(CONVERSION_QUEUE) private readonly conversionQueue: Queue,
   ) {}
 
-  async create(file: Express.Multer.File | undefined, title: string | undefined, user: AuthUser) {
+  async create(
+    file: Express.Multer.File | undefined,
+    title: string | undefined,
+    user: AuthUser,
+    course?: string,
+  ) {
     if (!file) throw new BadRequestException('Файл не передан');
     if (file.size > MAX_UPLOAD_BYTES) throw new BadRequestException('Файл больше 300 МБ');
 
@@ -56,12 +62,14 @@ export class PresentationsService {
       .basename(decodeFilename(file.originalname ?? ''), path.extname(file.originalname ?? ''))
       .trim();
     const cleanTitle = (title ?? fallbackTitle).trim().slice(0, 200);
+    const cleanCourse = course?.trim().slice(0, 100) || null;
 
     const presentation = await this.prisma.presentation.create({
       data: {
         id,
         teacherId: user.id,
         title: cleanTitle || 'Презентация без названия',
+        course: cleanCourse,
         sourceType: ext,
         originalPath: relativePath,
         status: 'processing',
@@ -81,12 +89,44 @@ export class PresentationsService {
     return presentation;
   }
 
-  async list(user: AuthUser) {
+  async list(user: AuthUser, filters: { course?: string; search?: string } = {}) {
+    const where: Prisma.PresentationWhereInput = { teacherId: user.id };
+    if (filters.course) where.course = filters.course;
+    if (filters.search) {
+      where.OR = [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { course: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
     return this.prisma.presentation.findMany({
-      where: { teacherId: user.id },
+      where,
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { slides: true, lectures: true } } },
     });
+  }
+
+  /** Различные курсы/дисциплины преподавателя — для тегов фильтрации. */
+  async listTags(user: AuthUser): Promise<string[]> {
+    const rows = await this.prisma.presentation.findMany({
+      where: { teacherId: user.id, course: { not: null } },
+      distinct: ['course'],
+      select: { course: true },
+      orderBy: { course: 'asc' },
+    });
+    return rows.map((r) => r.course!).filter((c) => c.trim().length > 0);
+  }
+
+  async updateProperties(
+    id: string,
+    user: AuthUser,
+    props: { title?: string; course?: string },
+  ) {
+    await this.getOwned(id, user);
+    const data: { title?: string; course?: string | null } = {};
+    if (props.title !== undefined) data.title = props.title.trim().slice(0, 200);
+    if (props.course !== undefined) data.course = props.course.trim() ? props.course.trim().slice(0, 100) : null;
+    if (Object.keys(data).length === 0) return this.getOwned(id, user);
+    return this.prisma.presentation.update({ where: { id }, data });
   }
 
   async getOwned(id: string, user: AuthUser) {
@@ -101,11 +141,6 @@ export class PresentationsService {
     });
     if (!presentation) throw new NotFoundException('Презентация не найдена');
     return presentation;
-  }
-
-  async updateTitle(id: string, title: string, user: AuthUser) {
-    await this.getOwned(id, user);
-    return this.prisma.presentation.update({ where: { id }, data: { title: title.slice(0, 200) } });
   }
 
   async remove(id: string, user: AuthUser) {

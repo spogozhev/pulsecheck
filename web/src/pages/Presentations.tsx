@@ -10,12 +10,25 @@ export function PresentationsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [courseFilter, setCourseFilter] = useState<string | null>(null);
 
   const list = useQuery({
-    queryKey: ['presentations'],
-    queryFn: () => api.get<Presentation[]>('/api/presentations'),
+    queryKey: ['presentations', search, courseFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('search', search.trim());
+      if (courseFilter) params.set('course', courseFilter);
+      return api.get<Presentation[]>(`/api/presentations?${params.toString()}`);
+    },
     refetchInterval: (q) =>
       q.state.data?.some((p) => p.status === 'processing') ? 3000 : false,
+  });
+
+  const tags = useQuery({
+    queryKey: ['presentationTags'],
+    queryFn: () => api.get<string[]>('/api/presentations/tags'),
+    staleTime: 30_000,
   });
 
   const upload = useMutation({
@@ -97,6 +110,38 @@ export function PresentationsPage() {
         <div className="mb-4 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{uploadError}</div>
       )}
 
+      {/* Быстрый поиск и теги курсов */}
+      <div className="card mb-4 flex flex-wrap items-center gap-2 p-3">
+        <input
+          className="input max-w-xs flex-1"
+          value={search}
+          placeholder="Поиск по названию или курсу"
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {(tags.data ?? []).map((t) => (
+          <button
+            key={t}
+            onClick={() => setCourseFilter(courseFilter === t ? null : t)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              courseFilter === t
+                ? 'bg-sky-600 text-white'
+                : 'bg-sky-50 text-sky-700 hover:bg-sky-100'
+            }`}
+            title={`Показать только презентации курса «${t}»`}
+          >
+            #{t}
+          </button>
+        ))}
+        {courseFilter && (
+          <button
+            className="text-xs text-slate-400 hover:text-slate-700"
+            onClick={() => setCourseFilter(null)}
+          >
+            сбросить фильтр ✕
+          </button>
+        )}
+      </div>
+
       {list.isLoading ? (
         <div className="text-slate-400">Загрузка…</div>
       ) : !list.data?.length ? (
@@ -122,7 +167,7 @@ export function PresentationsPage() {
                     <div className="text-xs text-slate-400">
                       {p.sourceType.toUpperCase()} · {dayjs(p.createdAt).format('D MMM YYYY')}
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       {p.status === 'processing' && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
                           ⏳ Обработка…
@@ -137,6 +182,20 @@ export function PresentationsPage() {
                         <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs text-rose-700" title={p.error ?? ''}>
                           Ошибка обработки
                         </span>
+                      )}
+                      {p.course && (
+                        <button
+                          className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-100"
+                          title={`Показать только презентации курса «${p.course}»`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setCourseFilter(p.course!);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                        >
+                          #{p.course}
+                        </button>
                       )}
                     </div>
                   </div>
