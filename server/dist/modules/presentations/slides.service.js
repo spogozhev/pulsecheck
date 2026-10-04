@@ -36,21 +36,21 @@ let SlidesService = class SlidesService {
         const maxIndex = presentation.slides.length
             ? Math.max(...presentation.slides.map((s) => s.index))
             : -1;
-        const newIndex = afterIndex === undefined || afterIndex === null
-            ? maxIndex + 1
-            : afterIndex + 1;
+        const newIndex = afterIndex === undefined || afterIndex === null ? maxIndex + 1 : afterIndex + 1;
         if (newIndex < 0 || newIndex > maxIndex + 1) {
             throw new common_1.BadRequestException('Некорректная позиция вставки');
         }
-        await this.shiftUp(presentationId, newIndex);
-        const slide = await this.prisma.slide.create({
-            data: { presentationId, index: newIndex, isGenerated: true },
+        return this.prisma.$transaction(async (tx) => {
+            await this.shiftRange(tx, presentationId, newIndex, 'up');
+            const slide = await tx.slide.create({
+                data: { presentationId, index: newIndex, isGenerated: true },
+            });
+            await tx.presentation.update({
+                where: { id: presentationId },
+                data: { slideCount: { increment: 1 } },
+            });
+            return slide;
         });
-        await this.prisma.presentation.update({
-            where: { id: presentationId },
-            data: { slideCount: { increment: 1 } },
-        });
-        return slide;
     }
     async remove(presentationId, slideId, user) {
         const presentation = await this.presentations.getOwned(presentationId, user);
@@ -58,11 +58,13 @@ let SlidesService = class SlidesService {
         if (!slide)
             throw new common_1.NotFoundException('Слайд не найден');
         await this.ensureNoActiveLecture(presentationId);
-        await this.prisma.slide.delete({ where: { id: slideId } });
-        await this.shiftDown(presentationId, slide.index);
-        await this.prisma.presentation.update({
-            where: { id: presentationId },
-            data: { slideCount: { decrement: 1 } },
+        await this.prisma.$transaction(async (tx) => {
+            await tx.slide.delete({ where: { id: slideId } });
+            await this.shiftRange(tx, presentationId, slide.index, 'down');
+            await tx.presentation.update({
+                where: { id: presentationId },
+                data: { slideCount: { decrement: 1 } },
+            });
         });
         return { ok: true };
     }
@@ -70,8 +72,9 @@ let SlidesService = class SlidesService {
         if (!Array.isArray(dto.slideIds) || dto.slideIds.length === 0) {
             throw new common_1.BadRequestException('Не выбраны слайды для копирования');
         }
-        if (dto.slideIds.length > 100)
+        if (dto.slideIds.length > 100) {
             throw new common_1.BadRequestException('Можно копировать не более 100 слайдов за раз');
+        }
         const sources = await this.prisma.slide.findMany({
             where: { id: { in: dto.slideIds } },
             include: {
@@ -99,50 +102,62 @@ let SlidesService = class SlidesService {
         if (base < 0 || base > maxIndex + 1) {
             throw new common_1.BadRequestException('Некорректная позиция вставки');
         }
-        await this.shiftUp(dto.targetPresentationId, base, sources.length);
         const storageDir = this.config.get('storageDir');
         const targetSlidesDir = node_path_1.default.join(storageDir, 'slides', dto.targetPresentationId);
         await (0, promises_1.mkdir)(targetSlidesDir, { recursive: true });
-        const created = [];
+        const preparedFiles = [];
         for (let i = 0; i < sources.length; i++) {
             const src = sources[i];
             const newIndex = base + i;
-            let imagePath = null;
             if (src.imagePath) {
-                const ext = node_path_1.default.extname(src.imagePath);
-                const fileName = `${newIndex}-${(0, node_crypto_1.randomBytes)(4).toString('hex')}${ext}`;
-                await (0, promises_1.copyFile)(node_path_1.default.join(storageDir, src.imagePath), node_path_1.default.join(targetSlidesDir, fileName));
-                imagePath = `slides/${dto.targetPresentationId}/${fileName}`;
-            }
-            await this.prisma.slide.create({
-                data: {
-                    presentationId: dto.targetPresentationId,
+                const fileName = `${newIndex}-${(0, node_crypto_1.randomBytes)(4).toString('hex')}${node_path_1.default.extname(src.imagePath)}`;
+                preparedFiles.push({
                     index: newIndex,
-                    imagePath,
-                    isGenerated: src.isGenerated,
-                    poll: src.poll
-                        ? {
-                            create: {
-                                questionText: src.poll.questionText,
-                                type: src.poll.type,
-                                required: src.poll.required,
-                                options: {
-                                    create: src.poll.options
-                                        .sort((a, b) => a.position - b.position)
-                                        .map((o) => ({ text: o.text, position: o.position })),
-                                },
-                            },
-                        }
-                        : undefined,
-                },
-            });
-            created.push(src.id);
+                    fileName,
+                    sourcePath: node_path_1.default.join(storageDir, src.imagePath),
+                });
+            }
         }
-        await this.prisma.presentation.update({
-            where: { id: dto.targetPresentationId },
-            data: { slideCount: { increment: sources.length } },
+        return this.prisma.$transaction(async (tx) => {
+            await this.shiftRange(tx, dto.targetPresentationId, base, 'up', sources.length);
+            for (let i = 0; i < sources.length; i++) {
+                const src = sources[i];
+                const newIndex = base + i;
+                let imagePath = null;
+                const prepared = preparedFiles.find((f) => f.index === newIndex);
+                if (prepared) {
+                    await (0, promises_1.copyFile)(prepared.sourcePath, node_path_1.default.join(targetSlidesDir, prepared.fileName));
+                    imagePath = `slides/${dto.targetPresentationId}/${prepared.fileName}`;
+                }
+                await tx.slide.create({
+                    data: {
+                        presentationId: dto.targetPresentationId,
+                        index: newIndex,
+                        imagePath,
+                        isGenerated: src.isGenerated,
+                        poll: src.poll
+                            ? {
+                                create: {
+                                    questionText: src.poll.questionText,
+                                    type: src.poll.type,
+                                    required: src.poll.required,
+                                    options: {
+                                        create: src.poll.options
+                                            .sort((a, b) => a.position - b.position)
+                                            .map((o) => ({ text: o.text, position: o.position })),
+                                    },
+                                },
+                            }
+                            : undefined,
+                    },
+                });
+            }
+            await tx.presentation.update({
+                where: { id: dto.targetPresentationId },
+                data: { slideCount: { increment: sources.length } },
+            });
+            return { copied: sources.length, targetPresentationId: dto.targetPresentationId };
         });
-        return { copied: created.length, targetPresentationId: dto.targetPresentationId };
     }
     async ensureNoActiveLecture(presentationId) {
         const active = await this.prisma.lecture.count({
@@ -152,27 +167,15 @@ let SlidesService = class SlidesService {
             throw new common_1.ConflictException('Идёт активная лекция по этой презентации — завершите её перед изменением слайдов');
         }
     }
-    async shiftUp(presentationId, from, shift = 1) {
-        await this.prisma.$executeRaw(client_1.Prisma.sql `
-        WITH ordered AS (
-          SELECT id FROM slides
-          WHERE presentation_id = ${presentationId} AND index >= ${from}
-          ORDER BY index DESC
-        )
-        UPDATE slides SET index = slides.index + ${shift}
-        FROM ordered WHERE slides.id = ordered.id
-      `);
-    }
-    async shiftDown(presentationId, after) {
-        await this.prisma.$executeRaw(client_1.Prisma.sql `
-        WITH ordered AS (
-          SELECT id FROM slides
-          WHERE presentation_id = ${presentationId} AND index > ${after}
-          ORDER BY index ASC
-        )
-        UPDATE slides SET index = slides.index - 1
-        FROM ordered WHERE slides.id = ordered.id
-      `);
+    async shiftRange(tx, presentationId, from, direction, shift = 1) {
+        const { _max } = await tx.slide.aggregate({
+            _max: { index: true },
+            where: { presentationId },
+        });
+        const bump = (_max.index ?? 0) + shift + 1;
+        await tx.$executeRaw(client_1.Prisma.sql `UPDATE slides SET index = index + ${bump} WHERE presentation_id = ${presentationId} AND index >= ${from}`);
+        const second = direction === 'up' ? bump - shift : bump + 1;
+        await tx.$executeRaw(client_1.Prisma.sql `UPDATE slides SET index = index - ${second} WHERE presentation_id = ${presentationId} AND index >= ${from}`);
     }
 };
 exports.SlidesService = SlidesService;

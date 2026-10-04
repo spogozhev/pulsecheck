@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PresentationsService } from './presentations.service';
@@ -35,24 +35,22 @@ export class SlidesService {
     const maxIndex = presentation.slides.length
       ? Math.max(...presentation.slides.map((s) => s.index))
       : -1;
-    const newIndex =
-      afterIndex === undefined || afterIndex === null
-        ? maxIndex + 1
-        : afterIndex + 1;
+    const newIndex = afterIndex === undefined || afterIndex === null ? maxIndex + 1 : afterIndex + 1;
     if (newIndex < 0 || newIndex > maxIndex + 1) {
       throw new BadRequestException('Некорректная позиция вставки');
     }
 
-    await this.shiftUp(presentationId, newIndex);
-
-    const slide = await this.prisma.slide.create({
-      data: { presentationId, index: newIndex, isGenerated: true },
+    return this.prisma.$transaction(async (tx) => {
+      await this.shiftRange(tx, presentationId, newIndex, 'up');
+      const slide = await tx.slide.create({
+        data: { presentationId, index: newIndex, isGenerated: true },
+      });
+      await tx.presentation.update({
+        where: { id: presentationId },
+        data: { slideCount: { increment: 1 } },
+      });
+      return slide;
     });
-    await this.prisma.presentation.update({
-      where: { id: presentationId },
-      data: { slideCount: { increment: 1 } },
-    });
-    return slide;
   }
 
   async remove(presentationId: string, slideId: string, user: AuthUser) {
@@ -61,11 +59,13 @@ export class SlidesService {
     if (!slide) throw new NotFoundException('Слайд не найден');
     await this.ensureNoActiveLecture(presentationId);
 
-    await this.prisma.slide.delete({ where: { id: slideId } });
-    await this.shiftDown(presentationId, slide.index);
-    await this.prisma.presentation.update({
-      where: { id: presentationId },
-      data: { slideCount: { decrement: 1 } },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.slide.delete({ where: { id: slideId } });
+      await this.shiftRange(tx, presentationId, slide.index, 'down');
+      await tx.presentation.update({
+        where: { id: presentationId },
+        data: { slideCount: { decrement: 1 } },
+      });
     });
     return { ok: true };
   }
@@ -75,7 +75,9 @@ export class SlidesService {
     if (!Array.isArray(dto.slideIds) || dto.slideIds.length === 0) {
       throw new BadRequestException('Не выбраны слайды для копирования');
     }
-    if (dto.slideIds.length > 100) throw new BadRequestException('Можно копировать не более 100 слайдов за раз');
+    if (dto.slideIds.length > 100) {
+      throw new BadRequestException('Можно копировать не более 100 слайдов за раз');
+    }
 
     const sources = await this.prisma.slide.findMany({
       where: { id: { in: dto.slideIds } },
@@ -108,59 +110,70 @@ export class SlidesService {
       throw new BadRequestException('Некорректная позиция вставки');
     }
 
-    await this.shiftUp(dto.targetPresentationId, base, sources.length);
-
     const storageDir = this.config.get<string>('storageDir')!;
     const targetSlidesDir = path.join(storageDir, 'slides', dto.targetPresentationId);
     await mkdir(targetSlidesDir, { recursive: true });
 
-    const created: string[] = [];
+    // файлы копируем заранее: транзакция должна оставаться короткой
+    const preparedFiles: Array<{ index: number; fileName: string; sourcePath: string }> = [];
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];
       const newIndex = base + i;
-
-      let imagePath: string | null = null;
       if (src.imagePath) {
-        const ext = path.extname(src.imagePath);
-        const fileName = `${newIndex}-${randomBytes(4).toString('hex')}${ext}`;
-        await copyFile(
-          path.join(storageDir, src.imagePath),
-          path.join(targetSlidesDir, fileName),
-        );
-        imagePath = `slides/${dto.targetPresentationId}/${fileName}`;
-      }
-
-      await this.prisma.slide.create({
-        data: {
-          presentationId: dto.targetPresentationId,
+        const fileName = `${newIndex}-${randomBytes(4).toString('hex')}${path.extname(src.imagePath)}`;
+        preparedFiles.push({
           index: newIndex,
-          imagePath,
-          isGenerated: src.isGenerated,
-          poll: src.poll
-            ? {
-                create: {
-                  questionText: src.poll.questionText,
-                  type: src.poll.type,
-                  required: src.poll.required,
-                  options: {
-                    create: src.poll.options
-                      .sort((a, b) => a.position - b.position)
-                      .map((o) => ({ text: o.text, position: o.position })),
-                  },
-                },
-              }
-            : undefined,
-        },
-      });
-      created.push(src.id);
+          fileName,
+          sourcePath: path.join(storageDir, src.imagePath),
+        });
+      }
     }
 
-    await this.prisma.presentation.update({
-      where: { id: dto.targetPresentationId },
-      data: { slideCount: { increment: sources.length } },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      await this.shiftRange(tx, dto.targetPresentationId, base, 'up', sources.length);
 
-    return { copied: created.length, targetPresentationId: dto.targetPresentationId };
+      for (let i = 0; i < sources.length; i++) {
+        const src = sources[i];
+        const newIndex = base + i;
+
+        let imagePath: string | null = null;
+        const prepared = preparedFiles.find((f) => f.index === newIndex);
+        if (prepared) {
+          await copyFile(prepared.sourcePath, path.join(targetSlidesDir, prepared.fileName));
+          imagePath = `slides/${dto.targetPresentationId}/${prepared.fileName}`;
+        }
+
+        await tx.slide.create({
+          data: {
+            presentationId: dto.targetPresentationId,
+            index: newIndex,
+            imagePath,
+            isGenerated: src.isGenerated,
+            poll: src.poll
+              ? {
+                  create: {
+                    questionText: src.poll.questionText,
+                    type: src.poll.type,
+                    required: src.poll.required,
+                    options: {
+                      create: src.poll.options
+                        .sort((a, b) => a.position - b.position)
+                        .map((o) => ({ text: o.text, position: o.position })),
+                    },
+                  },
+                }
+              : undefined,
+          },
+        });
+      }
+
+      await tx.presentation.update({
+        where: { id: dto.targetPresentationId },
+        data: { slideCount: { increment: sources.length } },
+      });
+
+      return { copied: sources.length, targetPresentationId: dto.targetPresentationId };
+    });
   }
 
   private async ensureNoActiveLecture(presentationId: string) {
@@ -174,32 +187,32 @@ export class SlidesService {
     }
   }
 
-  /** index >= from сдвигаются вверх на shift позиций (сверху вниз, чтобы не ломать unique). */
-  private async shiftUp(presentationId: string, from: number, shift = 1) {
-    await this.prisma.$executeRaw(
-      Prisma.sql`
-        WITH ordered AS (
-          SELECT id FROM slides
-          WHERE presentation_id = ${presentationId} AND index >= ${from}
-          ORDER BY index DESC
-        )
-        UPDATE slides SET index = slides.index + ${shift}
-        FROM ordered WHERE slides.id = ordered.id
-      `,
+  /**
+   * Сдвигает слайды с индексом >= from на shift позиций (вверх) или на 1 позицию вниз.
+   *
+   * Индексы уникальны (presentation_id, index), а Postgres проверяет уникальность построчно
+   * в непредсказуемом порядке — поэтому сдвиг делается в два конфликт-свободных прохода:
+   * сначала все затронутые строки уезжают в свободную зону за пределами максимального индекса,
+   * затем возвращаются уже на целевые позиции. Оба оператора выполняются в одной транзакции.
+   */
+  private async shiftRange(
+    tx: Prisma.TransactionClient,
+    presentationId: string,
+    from: number,
+    direction: 'up' | 'down',
+    shift = 1,
+  ): Promise<void> {
+    const { _max } = await tx.slide.aggregate({
+      _max: { index: true },
+      where: { presentationId },
+    });
+    const bump = (_max.index ?? 0) + shift + 1;
+    await tx.$executeRaw(
+      Prisma.sql`UPDATE slides SET index = index + ${bump} WHERE presentation_id = ${presentationId} AND index >= ${from}`,
     );
-  }
-
-  private async shiftDown(presentationId: string, after: number) {
-    await this.prisma.$executeRaw(
-      Prisma.sql`
-        WITH ordered AS (
-          SELECT id FROM slides
-          WHERE presentation_id = ${presentationId} AND index > ${after}
-          ORDER BY index ASC
-        )
-        UPDATE slides SET index = slides.index - 1
-        FROM ordered WHERE slides.id = ordered.id
-      `,
+    const second = direction === 'up' ? bump - shift : bump + 1;
+    await tx.$executeRaw(
+      Prisma.sql`UPDATE slides SET index = index - ${second} WHERE presentation_id = ${presentationId} AND index >= ${from}`,
     );
   }
 }

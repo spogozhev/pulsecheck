@@ -354,6 +354,55 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .expect(200);
     expect(after.body.total).toBe(0);
   });
+
+  it('вставка слайда-вопроса в середину большой презентации (уникальность индексов)', async () => {
+    const pages = Array.from({ length: 25 }, (_, i) => `Page ${i + 1}`);
+    const res = await request(app.getHttpServer())
+      .post('/api/presentations')
+      .set(authHeaders())
+      .attach('file', minimalPdf(pages), { filename: 'big.pdf', contentType: 'application/pdf' })
+      .expect(201);
+
+    let presentation = res.body;
+    for (let i = 0; i < 40 && presentation.status === 'processing'; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      presentation = (
+        await request(app.getHttpServer())
+          .get(`/api/presentations/${presentation.id}`)
+          .set(authHeaders())
+          .expect(200)
+      ).body;
+    }
+    expect(presentation.status).toBe('ready');
+    expect(presentation.slideCount).toBe(25);
+
+    // вставка слайда-вопроса в середину (после 10-го)
+    const slide = await request(app.getHttpServer())
+      .post(`/api/presentations/${presentation.id}/slides`)
+      .set(authHeaders())
+      .send({ afterIndex: 9 })
+      .expect(201);
+    expect(slide.body.index).toBe(10);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${presentation.id}`)
+      .set(authHeaders())
+      .expect(200);
+    expect(detail.body.slideCount).toBe(26);
+    expect(detail.body.slides.map((s: { index: number }) => s.index)).toEqual([...Array(26).keys()]);
+
+    // удаление вставленного слайда — индексы снова сшиваются без дыр
+    await request(app.getHttpServer())
+      .delete(`/api/presentations/${presentation.id}/slides/${slide.body.id}`)
+      .set(authHeaders())
+      .expect(200);
+    const after = await request(app.getHttpServer())
+      .get(`/api/presentations/${presentation.id}`)
+      .set(authHeaders())
+      .expect(200);
+    expect(after.body.slideCount).toBe(25);
+    expect(after.body.slides.map((s: { index: number }) => s.index)).toEqual([...Array(25).keys()]);
+  });
 });
 
 describe('Portable: экспорт и импорт презентации (§3.5 ТЗ)', () => {
