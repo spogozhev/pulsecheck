@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { api } from '../api/client';
-import type { PollResults, VotePayload, VoteResultsResponse } from '../api/types';
+import type { VotePayload, VoteResultsResponse } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
 import { Logo } from '../components/Logo';
 
@@ -21,41 +21,97 @@ const TYPE_LABEL: Record<string, string> = {
   ranking: 'Расставьте варианты по порядку: нажимайте от лучшего к худшему',
 };
 
+interface SessionState {
+  lectureTitle: string;
+  active: boolean;
+  slideIndex: number;
+  hasPoll: boolean;
+  /** true — преподаватель показал итоги предыдущего вопроса (или истёк таймаут 10 с) */
+  revealed: boolean;
+}
+
+/**
+ * Страница студента: один QR-код на всю лекцию. Страница следит за сессией и сама
+ * открывает активный вопрос, показывает итоги закрытого и переключается на следующий.
+ */
 export function VotePage() {
-  const { code, slide: slideParam } = useParams<{ code: string; slide: string }>();
-  const slideIndex = Number(slideParam);
+  const { code } = useParams<{ code: string }>();
   const headers = useMemo(() => ({ 'X-Anon-Id': anonId() }), []);
 
+  // Состояние сессии: какой вопрос сейчас активен у преподавателя
+  const sessionQ = useQuery({
+    queryKey: ['voteSession', code],
+    queryFn: () => api.get<SessionState>(`/api/vote/${code}`, headers),
+    refetchInterval: 2000,
+    retry: false,
+  });
+  const session = sessionQ.data;
+
+  // Какой вопрос сейчас показываем
+  const [viewSlide, setViewSlide] = useState<number | null>(null);
+  const [resultsMode, setResultsMode] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (!session) return;
+    if (session.active && session.hasPoll && session.slideIndex !== viewSlide) {
+      // Вопрос закрыт, активен другой слайд. При движении вперёд студент сначала видит итоги
+      // своего последнего вопроса, а новый вопрос открывается, когда преподаватель показал
+      // его на экране (кнопка «Продолжить показ»; без нажатия — автоматически через 10 секунд).
+      // При возврате назад итогов между вопросами нет — форма открывается сразу.
+      const forward = session.slideIndex > (viewSlide ?? -1);
+      const hadResults = viewSlide !== null && forward;
+      if (hadResults) {
+        setResultsMode(true);
+        setSubmitted(false);
+        if (session.revealed) {
+          setViewSlide(session.slideIndex);
+          setResultsMode(false);
+          setSubmitted(false);
+        }
+      } else {
+        setViewSlide(session.slideIndex);
+        setResultsMode(false);
+        setSubmitted(false);
+      }
+    } else if (session.active && session.hasPoll && resultsMode && session.revealed) {
+      // тот же вопрос открыли заново — разрешаем (пере)ответить
+      setResultsMode(false);
+      setSubmitted(false);
+    } else if (viewSlide !== null && !(session.active && session.hasPoll)) {
+      // слайд без опроса или лекция завершена — итоги последнего вопроса
+      setResultsMode(true);
+      setSubmitted(false);
+    }
+  }, [session, viewSlide, resultsMode]);
+
   const payloadQ = useQuery({
-    queryKey: ['vote', code, slideIndex],
-    queryFn: () => api.get<VotePayload>(`/api/vote/${code}/${slideIndex}`, headers),
-    refetchInterval: (q) => (q.state.data?.open ? 5000 : false),
+    queryKey: ['votePayload', code, viewSlide],
+    queryFn: () => api.get<VotePayload>(`/api/vote/${code}/${viewSlide}`, headers),
+    enabled: viewSlide !== null && !resultsMode && !!session?.active,
+    refetchInterval: (q) => (q.state.data?.open ? 4000 : false),
     retry: false,
   });
 
   const resultsQ = useQuery({
-    queryKey: ['voteResults', code, slideIndex],
-    queryFn: () => api.get<VoteResultsResponse>(`/api/vote/${code}/${slideIndex}/results`, headers),
-    enabled: !!payloadQ.data && !payloadQ.data.open && !!payloadQ.data.question,
-    refetchInterval: (q) => (q.state.data && !q.state.data.closed ? 3000 : false),
+    queryKey: ['voteResults', code, viewSlide],
+    queryFn: () => api.get<VoteResultsResponse>(`/api/vote/${code}/${viewSlide}/results`, headers),
+    enabled: viewSlide !== null && resultsMode,
+    refetchInterval: (q) => (q.state.data && !q.state.data.closed ? 2000 : false),
     retry: false,
   });
 
-  const payload = payloadQ.data;
-  const question = payload?.question ?? null;
+  const question = payloadQ.data?.question ?? null;
+  const questionId = question?.id ?? null;
 
-  // выбор пользователя
+  // выбор пользователя — сбрасывается при смене вопроса, восстанавливая ранее отправленный ответ
   const [selected, setSelected] = useState<string[]>([]);
   const [ranking, setRanking] = useState<string[]>([]);
-  const [submitted, setSubmitted] = useState(false);
 
-  const questionId = question?.id ?? null;
   useEffect(() => {
-    // сброс формы при смене вопроса и восстановление ранее отправленного ответа
-    setSubmitted(false);
-    if (payload?.yourAnswer) {
-      setSelected(payload.yourAnswer.selectedOptionIds ?? []);
-      setRanking(payload.yourAnswer.rankingOrder ?? []);
+    if (payloadQ.data?.yourAnswer) {
+      setSelected(payloadQ.data.yourAnswer.selectedOptionIds ?? []);
+      setRanking(payloadQ.data.yourAnswer.rankingOrder ?? []);
     } else {
       setSelected([]);
       setRanking([]);
@@ -65,7 +121,7 @@ export function VotePage() {
 
   const submit = useMutation({
     mutationFn: (body: { selectedOptionIds?: string[]; rankingOrder?: string[] }) =>
-      api.post(`/api/vote/${code}/${slideIndex}/answer`, body, headers),
+      api.post(`/api/vote/${code}/${viewSlide}/answer`, body, headers),
     onSuccess: () => setSubmitted(true),
   });
 
@@ -89,10 +145,14 @@ export function VotePage() {
   };
 
   // --- Состояния страницы ---
-  if (payloadQ.isLoading) {
-    return <Shell><div className="text-slate-400">Загрузка…</div></Shell>;
+  if (sessionQ.isLoading) {
+    return (
+      <Shell>
+        <div className="text-slate-400">Загрузка…</div>
+      </Shell>
+    );
   }
-  if (payloadQ.isError) {
+  if (sessionQ.isError) {
     return (
       <Shell>
         <div className="py-8 text-center">
@@ -105,42 +165,92 @@ export function VotePage() {
       </Shell>
     );
   }
-  if (!question) {
-    return (
-      <Shell>
-        <div className="py-8 text-center text-slate-500">На этом слайде нет вопроса для голосования</div>
-      </Shell>
-    );
-  }
 
-  const results: PollResults | undefined = resultsQ.data?.results;
-
-  // Голосование закрыто — показываем финальные итоги (решение заказчика)
-  if (!payloadQ.data!.open && resultsQ.data?.closed && results) {
+  // Итоги закрытого вопроса
+  if (resultsMode && viewSlide !== null) {
+    if (!resultsQ.data?.closed || !resultsQ.data.results) {
+      return (
+        <Shell lectureTitle={session!.lectureTitle}>
+          <div className="py-10 text-center text-slate-400">
+            <div className="mb-3 text-4xl">⏳</div>
+            Вопрос закрыт, загружаем итоги…
+          </div>
+        </Shell>
+      );
+    }
+    const results = resultsQ.data.results;
     return (
-      <Shell lectureTitle={payload!.lectureTitle}>
-        <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">{question.questionText}</h1>
+      <Shell lectureTitle={session!.lectureTitle}>
+        <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">{results.questionText}</h1>
         <div className="mb-4 text-xs font-semibold uppercase tracking-wider text-emerald-600">
           Голосование завершено · итоги
         </div>
         <ResultsView results={results} />
         <div className="mt-6 text-center text-sm text-slate-400">
-          {submitted || payload?.yourAnswer ? 'Спасибо за участие!' : 'Спасибо за внимание!'}
+          {submitted || payloadQ.data?.yourAnswer ? 'Спасибо за участие!' : 'Спасибо за внимание!'}
+          {session!.active && (
+            <div className="mt-1">Следующий вопрос откроется, когда преподаватель продолжит показ.</div>
+          )}
         </div>
       </Shell>
     );
   }
 
-  // Ответ отправлен, ждём закрытия голосования
-  if (submitted || (payload?.yourAnswer && payloadQ.data!.open)) {
+  // Активного вопроса нет — ожидание либо завершённая лекция
+  if (viewSlide === null || !session!.active) {
     return (
-      <Shell lectureTitle={payload!.lectureTitle}>
+      <Shell lectureTitle={session!.lectureTitle}>
+        <div className="py-10 text-center">
+          {session!.active ? (
+            <>
+              <div className="mb-4 flex justify-center">
+                <span className="flex h-4 w-4 animate-ping rounded-full bg-sky-500 opacity-75" />
+              </div>
+              <div className="text-lg font-semibold text-slate-800">Ждём вопрос…</div>
+              <div className="mx-auto mt-2 max-w-xs text-sm text-slate-400">
+                Страница открыта: как только преподаватель запустит голосование, вопрос появится
+                здесь автоматически. Обновлять ничего не нужно.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-3 text-4xl">🏁</div>
+              <div className="font-medium text-slate-700">Лекция завершена</div>
+              <div className="mt-1 text-sm text-slate-400">Спасибо за участие!</div>
+            </>
+          )}
+        </div>
+      </Shell>
+    );
+  }
+
+  if (payloadQ.isLoading || !payloadQ.data) {
+    return (
+      <Shell lectureTitle={session!.lectureTitle}>
+        <div className="text-slate-400">Загрузка вопроса…</div>
+      </Shell>
+    );
+  }
+
+  const payload = payloadQ.data;
+  if (!question) {
+    return (
+      <Shell lectureTitle={session!.lectureTitle}>
+        <div className="py-8 text-center text-slate-500">На этом слайде нет вопроса</div>
+      </Shell>
+    );
+  }
+
+  // Ответ уже отправлен — подтверждение, пока вопрос открыт
+  if (submitted || (payload.yourAnswer && payload.open)) {
+    return (
+      <Shell lectureTitle={session!.lectureTitle}>
         <div className="py-10 text-center">
           <div className="mb-3 text-5xl">✅</div>
           <div className="text-lg font-semibold text-slate-800">Ответ сохранён</div>
           <div className="mx-auto mt-2 max-w-xs text-sm text-slate-400">
-            Можно изменить ответ, пока преподаватель на этом слайде. Итоги появятся после перехода к
-            следующему слайду.
+            Можно изменить ответ, пока вопрос открыт. Итоги появятся, когда преподаватель перейдёт
+            к следующему слайду, а новый вопрос откроется здесь сам.
           </div>
           <button className="btn-secondary mt-5" onClick={() => setSubmitted(false)}>
             Изменить ответ
@@ -150,24 +260,20 @@ export function VotePage() {
     );
   }
 
-  // Вопрос ещё не активен
-  if (!payloadQ.data!.open) {
+  if (!payload.open) {
     return (
-      <Shell lectureTitle={payload!.lectureTitle}>
-        <div className="py-10 text-center">
+      <Shell lectureTitle={session!.lectureTitle}>
+        <div className="py-10 text-center text-slate-400">
           <div className="mb-3 text-4xl">⏳</div>
-          <div className="font-medium text-slate-700">Вопрос сейчас не активен</div>
-          <div className="mt-1 text-sm text-slate-400">
-            Ожидайте, когда преподаватель перейдёт к этому слайду
-          </div>
+          Вопрос закрыт, загружаем итоги…
         </div>
       </Shell>
     );
   }
 
-  // Активная форма голосования
+  // Форма активного вопроса
   return (
-    <Shell lectureTitle={payload!.lectureTitle}>
+    <Shell lectureTitle={session!.lectureTitle}>
       <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">{question.questionText}</h1>
       <div className="mb-4 text-sm text-slate-500">
         {TYPE_LABEL[question.type]}

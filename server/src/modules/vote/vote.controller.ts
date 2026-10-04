@@ -12,6 +12,13 @@ import { SubmitAnswerDto } from './dto/vote.dto';
 export class VoteController {
   constructor(private readonly vote: VoteService) {}
 
+  @Get(':code')
+  @Throttle({ default: { limit: 240, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Состояние сессии: активный вопрос (страница студента опрашивает её)' })
+  async sessionState(@Param('code') code: string) {
+    return this.vote.sessionState(code);
+  }
+
   @Get(':code/:slide')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'Данные вопроса по QR-ссылке /v/{code}/{slide}' })

@@ -126,10 +126,26 @@ export class LecturesService {
         questionText: slide.poll.questionText,
         required: slide.poll.required,
         options: slide.poll.options.map((o) => ({ id: o.id, text: o.text, position: o.position })),
+        votedCount,
       };
     }
 
     const answersTotal = await this.prisma.answer.count({ where: { lectureId: lecture.id } });
+
+    // Итоги предыдущего вопроса ожидают показа: ушли вперёд со слайда с ответами,
+    // преподаватель ещё не нажимал «Продолжить показ» и не переходил дальше
+    const pendingSlide =
+      lecture.pendingRevealSlideIndex !== null && lecture.resultsRevealedAt === null
+        ? await this.prisma.slide.findFirst({
+            where: {
+              presentationId: lecture.presentationId,
+              index: lecture.pendingRevealSlideIndex,
+            },
+            include: { poll: { select: { id: true } } },
+          })
+        : null;
+    const pendingResults =
+      pendingSlide?.poll ? { slideIndex: pendingSlide.index, pollId: pendingSlide.poll.id } : null;
 
     return {
       id: lecture.id,
@@ -139,10 +155,11 @@ export class LecturesService {
       currentSlideIndex: lecture.currentSlideIndex,
       slideCount: lecture.slideCount,
       voteCode: lecture.voteCode,
-      voteUrl: this.voteUrl(lecture.voteCode, lecture.currentSlideIndex),
+      voteUrl: this.voteUrl(lecture.voteCode),
       linkAnswers: lecture.linkAnswers,
       startedAt: lecture.startedAt,
       answersTotal,
+      pendingResults,
       presentation: { id: lecture.presentationId, title: lecture.presentation.title },
       slide: slide
         ? {
@@ -163,8 +180,46 @@ export class LecturesService {
     if (index < 0 || index >= lecture.slideCount) {
       throw new BadRequestException('Индекс слайда вне диапазона');
     }
-    await this.prisma.lecture.update({ where: { id }, data: { currentSlideIndex: index } });
+
+    // Уход вперёд со слайда с опросом, по которому есть ответы, показывает его итоги
+    // (чёрный экран с результатами). Переход к следующему слайду убирает оверлей
+    // и снимает ожидание студентов — как кнопка «Продолжить показ».
+    const leaveSlide =
+      index > lecture.currentSlideIndex
+        ? await this.prisma.slide.findFirst({
+            where: { presentationId: lecture.presentationId, index: lecture.currentSlideIndex },
+            include: { poll: { select: { id: true } } },
+          })
+        : null;
+    const leaveHasAnswers = leaveSlide?.poll
+      ? (await this.prisma.answer.count({
+          where: { lectureId: id, pollId: leaveSlide.poll.id },
+        })) > 0
+      : false;
+    const wasPendingUnrevealed =
+      lecture.pendingRevealSlideIndex !== null && lecture.resultsRevealedAt === null;
+
+    await this.prisma.lecture.update({
+      where: { id },
+      data: {
+        currentSlideIndex: index,
+        slideChangedAt: new Date(),
+        resultsRevealedAt: leaveHasAnswers ? null : wasPendingUnrevealed ? new Date() : null,
+        pendingRevealSlideIndex: leaveHasAnswers ? lecture.currentSlideIndex : null,
+      },
+    });
     return this.state(id, user);
+  }
+
+  /** Преподаватель показал итоги предыдущего вопроса («Продолжить показ») — студентам открывается следующий вопрос. */
+  async revealResults(id: string, user: AuthUser) {
+    const lecture = await this.getOwned(id, user);
+    if (lecture.status !== 'active') throw new ConflictException('Лекция уже завершена');
+    await this.prisma.lecture.update({
+      where: { id },
+      data: { resultsRevealedAt: new Date() },
+    });
+    return { ok: true };
   }
 
   async finish(id: string, user: AuthUser) {
@@ -326,8 +381,9 @@ export class LecturesService {
     throw new Error('Не удалось сгенерировать код сессии');
   }
 
-  private voteUrl(code: string, slideIndex: number): string {
-    return `${this.config.get<string>('publicBaseUrl')}/v/${code}/${slideIndex}`;
+  private voteUrl(code: string): string {
+    // QR-код один на всю лекцию: страница студента сама открывает каждый новый вопрос
+    return `${this.config.get<string>('publicBaseUrl')}/v/${code}`;
   }
 
   /** Добавляет счётчики ответов к списку лекций (для истории). */

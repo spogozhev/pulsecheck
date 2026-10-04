@@ -183,6 +183,17 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .send({ selectedOptionIds: ['нет-такого'] })
       .expect(400);
 
+    // счётчик голосов в presenter state учитывает оба ответа
+    const stateRes = await request(app.getHttpServer())
+      .get(`/api/lectures/${lecture.body.id}/state`)
+      .set(authHeaders())
+      .expect(200);
+    expect(stateRes.body.slide.poll.votedCount).toBe(2);
+
+    // публичное состояние сессии: активный вопрос на слайде 0
+    const session = await request(app.getHttpServer()).get(`/api/vote/${code}`).expect(200);
+    expect(session.body).toMatchObject({ active: true, slideIndex: 0, hasPoll: true, lectureTitle: 'Интеграционный тест' });
+
     // итоги скрыты, пока вопрос открыт
     const openResults = await request(app.getHttpServer())
       .get(`/api/vote/${code}/0/results`)
@@ -215,6 +226,23 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .set('X-Anon-Id', '77777777-6666-4555-8444-333333333333')
       .send({ selectedOptionIds: [opt1] })
       .expect(409);
+
+    // после перехода студент держит итоги (revealed=false — ещё не показаны)
+    let sessionAfterTransition = await request(app.getHttpServer())
+      .get(`/api/vote/${code}`)
+      .expect(200);
+    expect(sessionAfterTransition.body.revealed).toBe(false);
+
+    // повторное нажатие вперёд снимает ожидание — как «Продолжить показ»
+    await request(app.getHttpServer())
+      .patch(`/api/lectures/${lecture.body.id}/slide`)
+      .set(authHeaders())
+      .send({ index: 1 })
+      .expect(200);
+    sessionAfterTransition = await request(app.getHttpServer())
+      .get(`/api/vote/${code}`)
+      .expect(200);
+    expect(sessionAfterTransition.body.revealed).toBe(true);
   });
 
   it('аналитика и экспорт по лекции', async () => {

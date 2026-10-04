@@ -98,6 +98,12 @@ model Lecture {
   linkAnswers      Boolean   @default(true) @map("link_answers")
   currentSlideIndex Int      @default(0) @map("current_slide_index")
   slideCount       Int       @map("slide_count")
+  // момент последнего переключения слайда
+  slideChangedAt   DateTime  @default(now()) @map("slide_changed_at")
+  // индекс слайда, итоги которого ожидают показа (уход с вопроса с ответами);
+  // результатыRevealedAt — преподаватель показал их («Продолжить показ») или перешёл дальше
+  pendingRevealSlideIndex Int? @map("pending_reveal_slide_index")
+  resultsRevealedAt DateTime? @map("results_revealed_at")
   startedAt        DateTime  @default(now()) @map("started_at")
   endedAt          DateTime? @map("ended_at")
 

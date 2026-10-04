@@ -31,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/v/:code" element={<VotePage />} />
             <Route path="/v/:code/:slide" element={<VotePage />} />
             <Route
               path="/"

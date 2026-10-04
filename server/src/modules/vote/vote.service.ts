@@ -21,6 +21,27 @@ export class VoteService {
     private readonly config: ConfigService,
   ) {}
 
+  /** Состояние сессии для страницы студента: какой вопрос сейчас активен. */
+  async sessionState(code: string) {
+    const lecture = await this.prisma.lecture.findUnique({ where: { voteCode: code } });
+    if (!lecture) throw new NotFoundException('Сессия не найдена');
+
+    const slide = await this.prisma.slide.findFirst({
+      where: { presentationId: lecture.presentationId, index: lecture.currentSlideIndex },
+      include: { poll: { select: { id: true } } },
+    });
+    // Итоги держатся у студентов, пока преподаватель их показывает («Продолжить показ»)
+    // либо пока он не перешёл к следующему слайду
+    const revealed = lecture.resultsRevealedAt !== null;
+    return {
+      lectureTitle: lecture.title,
+      active: lecture.status === 'active',
+      slideIndex: lecture.currentSlideIndex,
+      hasPoll: !!slide?.poll,
+      revealed,
+    };
+  }
+
   /** Публичная страница голосования: данные вопроса по коду сессии и индексу слайда. */
   async payload(code: string, slideIndex: number, req: Request, res: Response) {
     const { lecture, slide } = await this.resolve(code, slideIndex);

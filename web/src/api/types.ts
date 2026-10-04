@@ -111,6 +111,7 @@ export interface LectureState {
   linkAnswers: boolean;
   startedAt: string;
   answersTotal: number;
+  pendingResults: { slideIndex: number; pollId: string } | null;
   presentation: { id: string; title: string };
   slide: {
     index: number;

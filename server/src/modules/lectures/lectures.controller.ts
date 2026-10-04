@@ -55,6 +55,12 @@ export class LecturesController {
     return this.lectures.setSlide(id, dto.index, user);
   }
 
+  @Post(':id/reveal')
+  @ApiOperation({ summary: 'Преподаватель показал итоги предыдущего вопроса («Продолжить показ»)' })
+  async reveal(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.lectures.revealResults(id, user);
+  }
+
   @Post(':id/finish')
   @ApiOperation({ summary: 'Завершить лекцию' })
   async finish(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser, @Req() req: Request) {

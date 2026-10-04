@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api/client';
-import type { LectureState, PollResults, Presentation } from '../api/types';
+import type { LectureState, PollResults } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
 
 const TYPE_HINT: Record<string, string> = {
@@ -16,7 +16,6 @@ export function PresentPage() {
   const { lectureId } = useParams<{ lectureId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [showResults, setShowResults] = useState<PollResults | null>(null);
   const [panelVisible, setPanelVisible] = useState(false);
 
   // Панель управления появляется, только когда курсор в нижней зоне экрана
@@ -35,38 +34,26 @@ export function PresentPage() {
     enabled: !!lectureId,
   });
 
-  const presQ = useQuery({
-    queryKey: ['pres', stateQ.data?.presentation.id],
-    queryFn: () => api.get<Presentation>(`/api/presentations/${stateQ.data!.presentation.id}`),
-    enabled: !!stateQ.data?.presentation.id,
-  });
-
-  const slides = presQ.data?.slides ?? [];
   const state = stateQ.data;
+
+  // Итоги предыдущего вопроса, которые ещё не показывали (с сервера — чтобы синхронизировать студентов)
+  const pendingPollId = state?.pendingResults?.pollId ?? null;
+  const pendingResultsQ = useQuery({
+    queryKey: ['pendingResults', lectureId, pendingPollId],
+    queryFn: () => api.get<PollResults>(`/api/lectures/${lectureId}/results?pollId=${pendingPollId}`),
+    enabled: !!pendingPollId,
+  });
 
   const go = useCallback(
     async (index: number) => {
       if (!state || !lectureId) return;
       const clamped = Math.max(0, Math.min(state.slideCount - 1, index));
-      const prevIndex = state.currentSlideIndex;
-      const prevSlide = slides.find((s) => s.index === prevIndex);
-
       const newState = await api.patch<LectureState>(`/api/lectures/${lectureId}/slide`, {
         index: clamped,
       });
       qc.setQueryData(['lectureState', lectureId], newState);
-
-      // §10: после перехода показываем результаты опроса предыдущего слайда
-      if (prevSlide?.poll && clamped > prevIndex) {
-        const results = await api.get<PollResults>(
-          `/api/lectures/${lectureId}/results?pollId=${prevSlide.poll.id}`,
-        );
-        setShowResults(results);
-      } else {
-        setShowResults(null);
-      }
     },
-    [state, lectureId, slides, qc],
+    [state, lectureId, qc],
   );
 
   useEffect(() => {
@@ -89,6 +76,14 @@ export function PresentPage() {
     mutationFn: () => api.post(`/api/lectures/${lectureId}/finish`),
     onSuccess: () => navigate(`/lectures/${lectureId}`),
   });
+
+  /** «Продолжить показ»: итоги показаны, студентам открывается следующий вопрос. */
+  const revealResults = useCallback(async () => {
+    await api.post(`/api/lectures/${lectureId}/reveal`);
+    qc.setQueryData(['lectureState', lectureId], (old: LectureState | undefined) =>
+      old ? { ...old, pendingResults: null } : old,
+    );
+  }, [lectureId, qc]);
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -162,21 +157,26 @@ export function PresentPage() {
           </div>
         )}
 
-        {/* Результаты предыдущего вопроса */}
-        {showResults && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/85 p-6">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Результаты предыдущего вопроса
+        {/* Результаты предыдущего вопроса: полностью закрывают экран (чёрный фон).
+            Показываются, пока преподаватель не нажал «Продолжить показ» (максимум 10 секунд). */}
+        {state.pendingResults && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950 p-6">
+            {pendingResultsQ.data ? (
+              <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Результаты предыдущего вопроса
+                </div>
+                <h3 className="mb-4 text-lg font-bold text-slate-800">
+                  {pendingResultsQ.data.questionText}
+                </h3>
+                <ResultsView results={pendingResultsQ.data} />
+                <button className="btn-primary mt-5 w-full" onClick={() => void revealResults()}>
+                  Продолжить показ
+                </button>
               </div>
-              <h3 className="mb-4 text-lg font-bold text-slate-800">
-                {showResults.questionText}
-              </h3>
-              <ResultsView results={showResults} />
-              <button className="btn-primary mt-5 w-full" onClick={() => setShowResults(null)}>
-                Продолжить показ
-              </button>
-            </div>
+            ) : (
+              <div className="text-slate-500">Загрузка результатов…</div>
+            )}
           </div>
         )}
 
