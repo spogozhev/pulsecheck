@@ -403,6 +403,53 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
     expect(after.body.slideCount).toBe(25);
     expect(after.body.slides.map((s: { index: number }) => s.index)).toEqual([...Array(25).keys()]);
   });
+
+  it('копирование опроса на слайд той же презентации без опроса', async () => {
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${process.env.TEST_PRESENTATION_ID}`)
+      .set(authHeaders())
+      .expect(200);
+    const source = detail.body.slides.find((s: { poll: unknown }) => s.poll);
+    const target = detail.body.slides.find((s: { poll: unknown }) => !s.poll);
+    expect(source).toBeTruthy();
+    expect(target).toBeTruthy();
+
+    const copy = await request(app.getHttpServer())
+      .post(
+        `/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${target.id}/poll/copy`,
+      )
+      .set(authHeaders())
+      .send({ fromSlideId: source.id })
+      .expect(201);
+    expect(copy.body.questionText).toBe('Любимый формат лекций?');
+    expect(copy.body.options).toHaveLength(3);
+    expect(copy.body.options[0].text).toBe('Очный');
+
+    // на слайде с опросом копирование запрещено
+    await request(app.getHttpServer())
+      .post(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${target.id}/poll/copy`)
+      .set(authHeaders())
+      .send({ fromSlideId: source.id })
+      .expect(409);
+
+    // копия редактируется независимо от оригинала
+    await request(app.getHttpServer())
+      .put(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${target.id}/poll`)
+      .set(authHeaders())
+      .send({
+        questionText: 'Копия с другим вопросом?',
+        type: 'multiple',
+        required: false,
+        options: [{ text: 'Да' }, { text: 'Нет' }],
+      })
+      .expect(200);
+    const original = await request(app.getHttpServer())
+      .get(`/api/presentations/${process.env.TEST_PRESENTATION_ID}`)
+      .set(authHeaders())
+      .expect(200);
+    const originalSlide = original.body.slides.find((s: { id: string }) => s.id === source.id);
+    expect(originalSlide.poll.questionText).toBe('Любимый формат лекций?');
+  });
 });
 
 describe('Portable: экспорт и импорт презентации (§3.5 ТЗ)', () => {

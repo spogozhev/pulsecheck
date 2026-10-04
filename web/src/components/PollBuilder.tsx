@@ -8,6 +8,13 @@ export interface PollDraft {
   options: { text: string }[];
 }
 
+/** Слайд этой же презентации, с которого можно скопировать опрос. */
+export interface PollCopySource {
+  id: string;
+  index: number;
+  questionText: string;
+}
+
 const TYPE_LABELS: Record<PollType, string> = {
   single: 'Один вариант',
   multiple: 'Несколько вариантов',
@@ -20,6 +27,9 @@ export function PollBuilder({
   saving,
   error,
   disabled = false,
+  copySources = [],
+  copying = false,
+  onCopyFrom,
   onSave,
   onRemove,
 }: {
@@ -27,6 +37,9 @@ export function PollBuilder({
   saving: boolean;
   error: string | null;
   disabled?: boolean;
+  copySources?: PollCopySource[];
+  copying?: boolean;
+  onCopyFrom?: (fromSlideId: string) => void;
   onSave: (draft: PollDraft) => void;
   onRemove: () => void;
 }) {
@@ -34,6 +47,7 @@ export function PollBuilder({
   const [type, setType] = useState<PollType>('single');
   const [required, setRequired] = useState(true);
   const [options, setOptions] = useState<string[]>(['', '']);
+  const [copyFromId, setCopyFromId] = useState<string | null>(null);
 
   useEffect(() => {
     const poll: Poll | null = slide.poll;
@@ -70,6 +84,36 @@ export function PollBuilder({
 
   return (
     <div className="space-y-4">
+      {!slide.poll && copySources.length > 0 && (
+        <div className="rounded-lg bg-slate-50 p-3">
+          <div className="mb-1.5 text-xs font-medium text-slate-500">
+            Скопировать опрос с другого слайда этой презентации:
+          </div>
+          <div className="flex gap-2">
+            <select
+              className="input flex-1 py-1.5 text-sm"
+              defaultValue=""
+              onChange={(e) => setCopyFromId(e.target.value || null)}
+            >
+              <option value="">— выберите слайд —</option>
+              {copySources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  №{s.index + 1} — {s.questionText}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-secondary shrink-0 py-1.5 text-sm"
+              disabled={!copyFromId || copying || disabled}
+              onClick={() => copyFromId && onCopyFrom?.(copyFromId)}
+            >
+              {copying ? 'Копирование…' : 'Скопировать'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div>
         <label className="label">Вопрос</label>
         <input

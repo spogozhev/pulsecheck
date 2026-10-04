@@ -1,10 +1,16 @@
-import { Body, Controller, Delete, Param, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { IsUUID } from 'class-validator';
 import { Request } from 'express';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditService } from '../audit/audit.service';
 import { PollsService } from './polls.service';
 import { SavePollDto } from './dto/poll.dto';
+
+class CopyPollDto {
+  @IsUUID()
+  fromSlideId!: string;
+}
 
 @ApiTags('Опросы')
 @ApiBearerAuth()
@@ -26,6 +32,20 @@ export class PollsController {
   ) {
     const poll = await this.polls.save(presentationId, slideId, dto, user);
     void this.audit.log(req, 'poll.save', { entityType: 'poll', entityId: poll.id });
+    return poll;
+  }
+
+  @Post('copy')
+  @ApiOperation({ summary: 'Скопировать опрос с другого слайда этой же презентации' })
+  async copy(
+    @Param('presentationId') presentationId: string,
+    @Param('slideId') slideId: string,
+    @Body() dto: CopyPollDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+  ) {
+    const poll = await this.polls.copyFromSlide(presentationId, slideId, dto.fromSlideId, user);
+    void this.audit.log(req, 'poll.copy', { entityType: 'poll', entityId: poll.id });
     return poll;
   }
 

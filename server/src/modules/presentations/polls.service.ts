@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PresentationsService } from './presentations.service';
@@ -82,5 +87,47 @@ export class PollsService {
 
     await this.prisma.poll.delete({ where: { id: slide.poll.id } });
     return { ok: true };
+  }
+
+  /** Копирует опрос с другого слайда этой же презентации на слайд без опроса. */
+  async copyFromSlide(
+    presentationId: string,
+    targetSlideId: string,
+    fromSlideId: string,
+    user: AuthUser,
+  ) {
+    if (targetSlideId === fromSlideId) {
+      throw new BadRequestException('Слайд-источник совпадает с целевым');
+    }
+    const presentation = await this.presentations.getOwned(presentationId, user);
+    const target = presentation.slides.find((s) => s.id === targetSlideId);
+    if (!target) throw new NotFoundException('Слайд не найден');
+    if (target.poll) throw new ConflictException('На этом слайде уже есть опрос');
+
+    const source = presentation.slides.find((s) => s.id === fromSlideId);
+    if (!source) throw new NotFoundException('Слайд-источник не найден');
+    if (!source.poll) throw new BadRequestException('На слайде-источнике нет опроса');
+
+    const active = await this.prisma.lecture.count({
+      where: { presentationId, status: 'active' },
+    });
+    if (active > 0) {
+      throw new BadRequestException('Нельзя изменять опросы во время активной лекции');
+    }
+
+    return this.prisma.poll.create({
+      data: {
+        slideId: target.id,
+        questionText: source.poll.questionText,
+        type: source.poll.type,
+        required: source.poll.required,
+        options: {
+          create: [...source.poll.options]
+            .sort((a, b) => a.position - b.position)
+            .map((o) => ({ text: o.text, position: o.position })),
+        },
+      },
+      include: { options: { orderBy: { position: 'asc' } } },
+    });
   }
 }

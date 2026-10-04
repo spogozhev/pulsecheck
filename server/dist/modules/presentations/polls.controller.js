@@ -15,10 +15,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PollsController = void 0;
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
+const class_validator_1 = require("class-validator");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
 const audit_service_1 = require("../audit/audit.service");
 const polls_service_1 = require("./polls.service");
 const poll_dto_1 = require("./dto/poll.dto");
+class CopyPollDto {
+    fromSlideId;
+}
+__decorate([
+    (0, class_validator_1.IsUUID)(),
+    __metadata("design:type", String)
+], CopyPollDto.prototype, "fromSlideId", void 0);
 let PollsController = class PollsController {
     polls;
     audit;
@@ -29,6 +37,11 @@ let PollsController = class PollsController {
     async save(presentationId, slideId, dto, user, req) {
         const poll = await this.polls.save(presentationId, slideId, dto, user);
         void this.audit.log(req, 'poll.save', { entityType: 'poll', entityId: poll.id });
+        return poll;
+    }
+    async copy(presentationId, slideId, dto, user, req) {
+        const poll = await this.polls.copyFromSlide(presentationId, slideId, dto.fromSlideId, user);
+        void this.audit.log(req, 'poll.copy', { entityType: 'poll', entityId: poll.id });
         return poll;
     }
     async remove(presentationId, slideId, user, req) {
@@ -50,6 +63,18 @@ __decorate([
     __metadata("design:paramtypes", [String, String, poll_dto_1.SavePollDto, Object, Object]),
     __metadata("design:returntype", Promise)
 ], PollsController.prototype, "save", null);
+__decorate([
+    (0, common_1.Post)('copy'),
+    (0, swagger_1.ApiOperation)({ summary: 'Скопировать опрос с другого слайда этой же презентации' }),
+    __param(0, (0, common_1.Param)('presentationId')),
+    __param(1, (0, common_1.Param)('slideId')),
+    __param(2, (0, common_1.Body)()),
+    __param(3, (0, current_user_decorator_1.CurrentUser)()),
+    __param(4, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, CopyPollDto, Object, Object]),
+    __metadata("design:returntype", Promise)
+], PollsController.prototype, "copy", null);
 __decorate([
     (0, common_1.Delete)(),
     (0, swagger_1.ApiOperation)({ summary: 'Удалить опрос со слайда' }),

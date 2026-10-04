@@ -79,6 +79,13 @@ export function PresentationDetailPage() {
     onError: fail,
   });
 
+  const copyPoll = useMutation({
+    mutationFn: (fromSlideId: string) =>
+      api.post(`/api/presentations/${id}/slides/${slide!.id}/poll/copy`, { fromSlideId }),
+    onSuccess: invalidate,
+    onError: fail,
+  });
+
   const addQuestionSlide = useMutation({
     mutationFn: (afterIndex: number | null) =>
       api.post(`/api/presentations/${id}/slides`, afterIndex === null ? {} : { afterIndex }),
@@ -299,6 +306,15 @@ export function PresentationDetailPage() {
                 saving={savePoll.isPending || removePoll.isPending}
                 error={savePoll.isError || removePoll.isError ? actionError : null}
                 disabled={notApproved}
+                copySources={slides
+                  .filter((s) => s.poll && s.id !== slide.id)
+                  .map((s) => ({
+                    id: s.id,
+                    index: s.index,
+                    questionText: s.poll!.questionText,
+                  }))}
+                copying={copyPoll.isPending}
+                onCopyFrom={(fromSlideId) => copyPoll.mutate(fromSlideId)}
                 onSave={(draft) => savePoll.mutate(draft)}
                 onRemove={() => removePoll.mutate()}
               />

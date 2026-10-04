@@ -83,6 +83,42 @@ let PollsService = class PollsService {
         await this.prisma.poll.delete({ where: { id: slide.poll.id } });
         return { ok: true };
     }
+    async copyFromSlide(presentationId, targetSlideId, fromSlideId, user) {
+        if (targetSlideId === fromSlideId) {
+            throw new common_1.BadRequestException('Слайд-источник совпадает с целевым');
+        }
+        const presentation = await this.presentations.getOwned(presentationId, user);
+        const target = presentation.slides.find((s) => s.id === targetSlideId);
+        if (!target)
+            throw new common_1.NotFoundException('Слайд не найден');
+        if (target.poll)
+            throw new common_1.ConflictException('На этом слайде уже есть опрос');
+        const source = presentation.slides.find((s) => s.id === fromSlideId);
+        if (!source)
+            throw new common_1.NotFoundException('Слайд-источник не найден');
+        if (!source.poll)
+            throw new common_1.BadRequestException('На слайде-источнике нет опроса');
+        const active = await this.prisma.lecture.count({
+            where: { presentationId, status: 'active' },
+        });
+        if (active > 0) {
+            throw new common_1.BadRequestException('Нельзя изменять опросы во время активной лекции');
+        }
+        return this.prisma.poll.create({
+            data: {
+                slideId: target.id,
+                questionText: source.poll.questionText,
+                type: source.poll.type,
+                required: source.poll.required,
+                options: {
+                    create: [...source.poll.options]
+                        .sort((a, b) => a.position - b.position)
+                        .map((o) => ({ text: o.text, position: o.position })),
+                },
+            },
+            include: { options: { orderBy: { position: 'asc' } } },
+        });
+    }
 };
 exports.PollsService = PollsService;
 exports.PollsService = PollsService = __decorate([
