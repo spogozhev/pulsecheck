@@ -8,6 +8,8 @@ import './index.css';
 import { AuthProvider, RequireAuth } from './state/auth';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/Login';
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordRecovery';
+import { ProfilePage } from './pages/Profile';
 import { PresentationsPage } from './pages/Presentations';
 import { PresentationDetailPage } from './pages/PresentationDetail';
 import { LecturesPage } from './pages/Lectures';
@@ -31,6 +33,9 @@ createRoot(document.getElementById('root')!).render(
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/profile" element={<RequireAuth><Layout><ProfilePage /></Layout></RequireAuth>} />
             <Route path="/v/:code" element={<VotePage />} />
             <Route path="/v/:code/:slide" element={<VotePage />} />
             <Route

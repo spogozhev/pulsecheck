@@ -766,3 +766,120 @@ describe('Модерация: подтверждение аккаунтов ад
     await request(app.getHttpServer()).get('/api/presentations').set(headers('teacher')).expect(200);
   });
 });
+
+describe('Профиль и восстановление пароля', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  const stamp = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const u = { email: `prof-${stamp}@slide.local`, password: 'password-12345', name: 'Профильный' };
+  let cookies: string[] = [];
+  let csrf = '';
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.use(cookieParser());
+    app.use(csrfMiddleware);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, transformOptions: { enableImplicitConversion: true } }),
+    );
+    await app.init();
+    prisma = app.get(PrismaService);
+
+    // пользователь одобряется сразу (иначе ApprovalGuard заблокирует мутации профиля)
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send(u)
+      .expect(201);
+    const setCookies = res.headers['set-cookie'] ?? [];
+    cookies = (Array.isArray(setCookies) ? setCookies : [setCookies]).map((c) => c.split(';')[0]);
+    csrf = cookies.find((c) => c.startsWith('csrf='))?.split('=')[1] ?? '';
+    await prisma.user.update({ where: { id: res.body.user.id }, data: { status: 'approved' } });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const authHeaders = () => ({ Cookie: cookies.join('; '), 'x-csrf-token': csrf });
+
+  it('смена имени без пароля', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/api/profile')
+      .set(authHeaders())
+      .send({ name: 'Новое Имя' })
+      .expect(200);
+    expect(res.body.name).toBe('Новое Имя');
+  });
+
+  it('смена email требует текущий пароль', async () => {
+    await request(app.getHttpServer())
+      .put('/api/profile')
+      .set(authHeaders())
+      .send({ email: `moved-${stamp}@slide.local` })
+      .expect(400);
+    await request(app.getHttpServer())
+      .put('/api/profile')
+      .set(authHeaders())
+      .send({ email: `moved-${stamp}@slide.local`, currentPassword: 'неверный' })
+      .expect(400);
+    const ok = await request(app.getHttpServer())
+      .put('/api/profile')
+      .set(authHeaders())
+      .send({ email: `moved-${stamp}@slide.local`, currentPassword: u.password })
+      .expect(200);
+    expect(ok.body.email).toBe(`moved-${stamp}@slide.local`);
+  });
+
+  it('смена пароля: неверный текущий отклоняется, верный проходит', async () => {
+    await request(app.getHttpServer())
+      .post('/api/profile/password')
+      .set(authHeaders())
+      .send({ currentPassword: 'неверный', newPassword: 'brand-new-12345' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/profile/password')
+      .set(authHeaders())
+      .send({ currentPassword: u.password, newPassword: 'brand-new-12345' })
+      .expect(201);
+
+    // старый пароль больше не подходит, новый работает
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: `moved-${stamp}@slide.local`, password: u.password })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: `moved-${stamp}@slide.local`, password: 'brand-new-12345' })
+      .expect(200);
+  });
+
+  it('восстановление пароля по email (dev-режим возвращает ссылку)', async () => {
+    const email = `moved-${stamp}@slide.local`;
+    const forgot = await request(app.getHttpServer())
+      .post('/api/auth/password/forgot')
+      .send({ email })
+      .expect(201);
+    expect(forgot.body.ok).toBe(true);
+    expect(forgot.body.devResetUrl).toBeTruthy();
+
+    const token = new URL(forgot.body.devResetUrl).searchParams.get('token')!;
+    await request(app.getHttpServer())
+      .post('/api/auth/password/reset')
+      .send({ token, newPassword: 'restored-12345' })
+      .expect(201);
+
+    // токен одноразовый
+    await request(app.getHttpServer())
+      .post('/api/auth/password/reset')
+      .send({ token, newPassword: 'again-123456' })
+      .expect(400);
+
+    // вход с паролем после восстановления
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password: 'restored-12345' })
+      .expect(200);
+  });
+});

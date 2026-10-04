@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../state/auth';
 import { Logo } from '../components/Logo';
 
@@ -84,6 +84,11 @@ export function LoginPage() {
         >
           {mode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
         </button>
+        {mode === 'login' && (
+          <Link to="/forgot-password" className="mt-2 block text-center text-xs text-slate-400 hover:text-sky-600">
+            Забыли пароль?
+          </Link>
+        )}
         {mode === 'login' && (
           <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-center text-xs text-slate-400">
             Демо: demo@slide.local / demo12345

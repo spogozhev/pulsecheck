@@ -13,5 +13,11 @@ export const configFactory = () => ({
     .map((s) => s.trim())
     .filter(Boolean),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL ?? 'http://localhost:5180').replace(/\/+$/, ''),
+  // SMTP для писем (восстановление пароля); без SMTP_HOST письма выводятся в консоль (dev)
+  smtpHost: process.env.SMTP_HOST ?? '',
+  smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
+  smtpUser: process.env.SMTP_USER ?? '',
+  smtpPass: process.env.SMTP_PASS ?? '',
+  mailFrom: process.env.MAIL_FROM ?? 'PulseCheck <no-reply@localhost>',
   isProd: process.env.NODE_ENV === 'production',
 });

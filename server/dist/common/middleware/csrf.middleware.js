@@ -3,7 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.csrfMiddleware = csrfMiddleware;
 const node_crypto_1 = require("node:crypto");
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const CSRF_EXEMPT = [/^\/api\/auth\/(login|register|logout)$/, /^\/api\/vote(\/|$)/];
+const CSRF_EXEMPT = [
+    /^\/api\/auth\/(login|register|logout)$/,
+    /^\/api\/auth\/password\//,
+    /^\/api\/vote(\/|$)/,
+];
 function csrfMiddleware(req, res, next) {
     if (SAFE_METHODS.has(req.method.toUpperCase()))
         return next();

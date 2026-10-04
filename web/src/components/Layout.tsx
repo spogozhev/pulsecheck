@@ -25,6 +25,9 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/lectures" className={navClass}>
             Лекции
           </NavLink>
+          <NavLink to="/profile" className={navClass}>
+            Профиль
+          </NavLink>
           {user?.role === 'admin' && (
             <NavLink to="/admin/users" className={navClass}>
               Пользователи

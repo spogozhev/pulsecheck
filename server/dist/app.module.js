@@ -26,6 +26,8 @@ const lectures_module_1 = require("./modules/lectures/lectures.module");
 const vote_module_1 = require("./modules/vote/vote.module");
 const storage_module_1 = require("./modules/storage/storage.module");
 const health_module_1 = require("./modules/health/health.module");
+const profile_module_1 = require("./modules/profile/profile.module");
+const mail_module_1 = require("./shared/mail.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -57,6 +59,8 @@ exports.AppModule = AppModule = __decorate([
             vote_module_1.VoteModule,
             storage_module_1.StorageModule,
             health_module_1.HealthModule,
+            profile_module_1.ProfileModule,
+            mail_module_1.MailModule,
         ],
         providers: [
             { provide: core_1.APP_GUARD, useClass: throttler_1.ThrottlerGuard },

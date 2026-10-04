@@ -4,7 +4,12 @@ import { timingSafeEqual } from 'node:crypto';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Эндпоинты без сессии или с собственной моделью доверия
-const CSRF_EXEMPT = [/^\/api\/auth\/(login|register|logout)$/, /^\/api\/vote(\/|$)/];
+const CSRF_EXEMPT = [
+  /^\/api\/auth\/(login|register|logout)$/,
+  // восстановление пароля: публичные, защищены одноразовым токеном из письма
+  /^\/api\/auth\/password\//,
+  /^\/api\/vote(\/|$)/,
+];
 
 /**
  * Double-submit cookie: мутации требуют заголовок x-csrf-token, совпадающий с cookie csrf.
