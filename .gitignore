@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+*.env
+!.env.example
+
+# runtime data
+storage/
+*.log
+dev.out.log
+
+# misc
+.vscode/
+.bak
+*.bak
+.claude/
+.z-ai-config/
+.zscripts/
+prompt
+PROMPT.md
+AGENTS.md

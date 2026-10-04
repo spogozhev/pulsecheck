@@ -1,0 +1,386 @@
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
+import { AppModule } from '../../src/app.module';
+import { csrfMiddleware } from '../../src/common/middleware/csrf.middleware';
+import { PrismaService } from '../../src/prisma/prisma.service';
+import { minimalPdf } from '../helpers';
+
+describe('Интеграция: золотой путь (§13 ТЗ)', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  let cookies: string[] = [];
+  let csrf: string;
+  const email = `test-${Date.now()}-${Math.floor(Math.random() * 10000)}@slide.local`;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.use(cookieParser());
+    app.use(csrfMiddleware);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, transformOptions: { enableImplicitConversion: true } }),
+    );
+    await app.init();
+    prisma = app.get(PrismaService);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const authHeaders = () => ({ Cookie: cookies.join('; '), 'x-csrf-token': csrf });
+
+  const captureCookies = (res: request.Response) => {
+    const setCookies = res.headers['set-cookie'] ?? [];
+    cookies = (Array.isArray(setCookies) ? setCookies : [setCookies]).map((c) => c.split(';')[0]);
+    const csrfCookie = cookies.find((c) => c.startsWith('csrf='));
+    csrf = csrfCookie ? csrfCookie.split('=')[1] : '';
+  };
+
+  it('регистрация и авто-вход', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'test-password-123', name: 'Тестовый Преподаватель' })
+      .expect(201);
+    captureCookies(res);
+    expect(res.body.user.status).toBe('pending');
+
+    // имитируем одобрение администратором (сам admin-API проверяется в сценарии модерации ниже)
+    await prisma.user.update({ where: { id: res.body.user.id }, data: { status: 'approved' } });
+    expect(csrf).toBeTruthy();
+  });
+
+  it('без сессии доступ к кабинету запрещён', async () => {
+    await request(app.getHttpServer()).get('/api/presentations').expect(401);
+  });
+
+  it('CSRF: мутация без заголовка отклоняется', async () => {
+    await request(app.getHttpServer())
+      .post('/api/presentations')
+      .set('Cookie', cookies.join('; '))
+      .expect(403);
+  });
+
+  it('загрузка PDF → конвертация в слайды', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/presentations')
+      .set(authHeaders())
+      .field('title', 'Интеграционный тест')
+      .attach('file', minimalPdf(['Slide one', 'Slide two']), {
+        filename: 'test.pdf',
+        contentType: 'application/pdf',
+      })
+      .expect(201);
+    expect(res.body.status).toBe('processing');
+
+    let presentation = res.body;
+    for (let i = 0; i < 40 && presentation.status === 'processing'; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const get = await request(app.getHttpServer())
+        .get(`/api/presentations/${presentation.id}`)
+        .set(authHeaders())
+        .expect(200);
+      presentation = get.body;
+    }
+    expect(presentation.status).toBe('ready');
+    expect(presentation.slideCount).toBe(2);
+    expect(presentation.slides[0].imagePath).toMatch(/\.png$/);
+  });
+
+  it('создание опроса на слайде (single) и валидация вариантов', async () => {
+    const list = await request(app.getHttpServer())
+      .get('/api/presentations')
+      .set(authHeaders())
+      .expect(200);
+    const presentation = list.body.find((p: { title: string }) => p.title === 'Интеграционный тест');
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${presentation.id}`)
+      .set(authHeaders())
+      .expect(200);
+    const slideId = detail.body.slides[0].id;
+
+    // меньше двух вариантов — отклоняется
+    await request(app.getHttpServer())
+      .put(`/api/presentations/${presentation.id}/slides/${slideId}/poll`)
+      .set(authHeaders())
+      .send({ questionText: 'Вопрос?', type: 'single', options: [{ text: 'Один' }] })
+      .expect(400);
+
+    const poll = await request(app.getHttpServer())
+      .put(`/api/presentations/${presentation.id}/slides/${slideId}/poll`)
+      .set(authHeaders())
+      .send({
+        questionText: 'Любимый формат лекций?',
+        type: 'single',
+        required: true,
+        options: [{ text: 'Очный' }, { text: 'Онлайн' }, { text: 'Гибрид' }],
+      })
+      .expect(200);
+    expect(poll.body.options).toHaveLength(3);
+
+    // сохраняем для голосования
+    process.env.TEST_PRESENTATION_ID = presentation.id;
+    process.env.TEST_SLIDE_ID = slideId;
+    process.env.TEST_POLL_OPTION_IDS = JSON.stringify(
+      (poll.body.options as { id: string }[]).map((o) => o.id),
+    );
+  });
+
+  it('запуск лекции и анонимное голосование', async () => {
+    const lecture = await request(app.getHttpServer())
+      .post('/api/lectures')
+      .set(authHeaders())
+      .send({ presentationId: process.env.TEST_PRESENTATION_ID, course: 'Интеграция' })
+      .expect(201);
+    const code = lecture.body.voteCode;
+
+    // страница студента: вопрос открыт
+    const payload = await request(app.getHttpServer())
+      .get(`/api/vote/${code}/0`)
+      .set('X-Anon-Id', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+      .expect(200);
+    expect(payload.body.open).toBe(true);
+    expect(payload.body.question.questionText).toBe('Любимый формат лекций?');
+
+    const [opt1, opt2] = JSON.parse(process.env.TEST_POLL_OPTION_IDS!);
+
+    // первый ответ
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+      .send({ selectedOptionIds: [opt1] })
+      .expect(201);
+
+    // переголосование тем же устройством перезаписывает ответ
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+      .send({ selectedOptionIds: [opt2] })
+      .expect(201);
+
+    // второй студент
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', '99999999-8888-4777-8666-555555555555')
+      .send({ selectedOptionIds: [opt1] })
+      .expect(201);
+
+    // некорректный вариант отклоняется
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', '77777777-6666-4555-8444-333333333333')
+      .send({ selectedOptionIds: ['нет-такого'] })
+      .expect(400);
+
+    // итоги скрыты, пока вопрос открыт
+    const openResults = await request(app.getHttpServer())
+      .get(`/api/vote/${code}/0/results`)
+      .set('X-Anon-Id', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+      .expect(200);
+    expect(openResults.body.closed).toBe(false);
+
+    // преподаватель переключает слайд → вопрос закрыт, итоги доступны
+    await request(app.getHttpServer())
+      .patch(`/api/lectures/${lecture.body.id}/slide`)
+      .set(authHeaders())
+      .send({ index: 1 })
+      .expect(200);
+
+    const closedResults = await request(app.getHttpServer())
+      .get(`/api/vote/${code}/0/results`)
+      .set('X-Anon-Id', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+      .expect(200);
+    expect(closedResults.body.closed).toBe(true);
+    expect(closedResults.body.results.totalResponses).toBe(2);
+    const byId = new Map(
+      (closedResults.body.results.options as { id: string; count: number }[]).map((o) => [o.id, o.count]),
+    );
+    expect(byId.get(opt1)).toBe(1); // переголосование учтено: opt2 вместо opt1 у первого
+    expect(byId.get(opt2)).toBe(1);
+
+    // голосование в закрытый вопрос отклоняется
+    await request(app.getHttpServer())
+      .post(`/api/vote/${code}/0/answer`)
+      .set('X-Anon-Id', '77777777-6666-4555-8444-333333333333')
+      .send({ selectedOptionIds: [opt1] })
+      .expect(409);
+  });
+
+  it('аналитика и экспорт по лекции', async () => {
+    const lectures = await request(app.getHttpServer())
+      .get('/api/lectures?course=Интеграция')
+      .set(authHeaders())
+      .expect(200);
+    expect(lectures.body).toHaveLength(1);
+    const lectureId = lectures.body[0].id;
+
+    const analytics = await request(app.getHttpServer())
+      .get(`/api/lectures/${lectureId}/analytics`)
+      .set(authHeaders())
+      .expect(200);
+    expect(analytics.body.polls).toHaveLength(1);
+    expect(analytics.body.polls[0].results.totalResponses).toBe(2);
+    expect(analytics.body.participants).toBe(2);
+
+    const csv = await request(app.getHttpServer())
+      .get(`/api/lectures/${lectureId}/export?format=csv`)
+      .set(authHeaders())
+      .expect(200);
+    expect(String(csv.text)).toContain('Любимый формат лекций?');
+
+    const json = await request(app.getHttpServer())
+      .get(`/api/lectures/${lectureId}/export?format=json`)
+      .set(authHeaders())
+      .expect(200);
+    expect(json.body.rawAnswers).toHaveLength(2);
+  });
+});
+
+describe('Модерация: подтверждение аккаунтов администратором', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  const stamp = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const teacher = { email: `pending-${stamp}@slide.local`, password: 'password-123456', name: 'Ожидающий' };
+  let teacherCookies: string[] = [];
+  let teacherCsrf = '';
+  let adminCookies: string[] = [];
+  let adminCsrf = '';
+  let userId = '';
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.use(cookieParser());
+    app.use(csrfMiddleware);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, transformOptions: { enableImplicitConversion: true } }),
+    );
+    await app.init();
+    prisma = app.get(PrismaService);
+
+    // администратор для тестов создаётся напрямую в БД
+    await prisma.user.create({
+      data: {
+        email: `admin-${stamp}@slide.local`,
+        name: 'Тестовый Админ',
+        role: 'admin',
+        status: 'approved',
+        passwordHash: await bcrypt.hash('admin-password-1', 12),
+        salt: randomBytes(16).toString('hex'),
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const capture = (res: request.Response, which: 'teacher' | 'admin') => {
+    const setCookies = res.headers['set-cookie'] ?? [];
+    const cookies = (Array.isArray(setCookies) ? setCookies : [setCookies]).map((c) => c.split(';')[0]);
+    const csrf = cookies.find((c) => c.startsWith('csrf='))?.split('=')[1] ?? '';
+    if (which === 'teacher') {
+      teacherCookies = cookies;
+      teacherCsrf = csrf;
+    } else {
+      adminCookies = cookies;
+      adminCsrf = csrf;
+    }
+  };
+  const headers = (which: 'teacher' | 'admin') =>
+    which === 'teacher'
+      ? { Cookie: teacherCookies.join('; '), 'x-csrf-token': teacherCsrf }
+      : { Cookie: adminCookies.join('; '), 'x-csrf-token': adminCsrf };
+
+  it('регистрация создаёт аккаунт в статусе pending', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send(teacher)
+      .expect(201);
+    capture(res, 'teacher');
+    expect(res.body.user.status).toBe('pending');
+    userId = res.body.user.id;
+  });
+
+  it('pending: чтение доступно, мутации запрещены (403)', async () => {
+    await request(app.getHttpServer())
+      .get('/api/presentations')
+      .set(headers('teacher'))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/lectures')
+      .set(headers('teacher'))
+      .send({ presentationId: '00000000-0000-4000-8000-000000000000' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/api/presentations')
+      .set(headers('teacher'))
+      .expect(403);
+  });
+
+  it('pending не имеет доступа к админ-API (403), админ видит его в списке', async () => {
+    await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .set(headers('teacher'))
+      .expect(403);
+
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: `admin-${stamp}@slide.local`, password: 'admin-password-1' })
+      .expect(200);
+    capture(login, 'admin');
+
+    const list = await request(app.getHttpServer())
+      .get('/api/admin/users?status=pending')
+      .set(headers('admin'))
+      .expect(200);
+    expect(list.body.some((u: { id: string }) => u.id === userId)).toBe(true);
+  });
+
+  it('после одобрения мутации проходят; блокировка снова их запрещает', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/admin/users/${userId}/approve`)
+      .set(headers('admin'))
+      .expect(201);
+
+    const upload = await request(app.getHttpServer())
+      .post('/api/presentations')
+      .set(headers('teacher'))
+      .attach('file', minimalPdf(['Одна']), { filename: 't.pdf', contentType: 'application/pdf' })
+      .expect(201);
+    expect(upload.body.status).toBe('processing');
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/users/${userId}/block`)
+      .set(headers('admin'))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/lectures')
+      .set(headers('teacher'))
+      .send({ presentationId: upload.body.id })
+      .expect(403);
+
+    // блокированный не может даже войти
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send(teacher)
+      .expect(403);
+
+    // повторное одобрение возвращает доступ
+    await request(app.getHttpServer())
+      .post(`/api/admin/users/${userId}/approve`)
+      .set(headers('admin'))
+      .expect(201);
+    await request(app.getHttpServer()).get('/api/presentations').set(headers('teacher')).expect(200);
+  });
+});

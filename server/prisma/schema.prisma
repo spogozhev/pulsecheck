@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  name         String
+  role         String        @default("teacher") // teacher | admin
+  // pending | approved | blocked. Дефолт approved — для существующих пользователей при миграции;
+  // новые регистрации создаются со статусом pending (см. AuthService.register) и требуют одобрения админом.
+  status       String        @default("approved")
+  salt         String // соль для псевдонимизации anonymous_id (per-teacher)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  presentations Presentation[]
+  lectures     Lecture[]
+  auditLogs    AuditLog[]
+
+  @@index([status])
+  @@map("users")
+}
+
+model Presentation {
+  id          String   @id @default(uuid())
+  teacherId   String   @map("teacher_id")
+  teacher     User     @relation(fields: [teacherId], references: [id])
+  title       String
+  sourceType  String   @map("source_type") // pdf | pptx
+  originalPath String? @map("original_path")
+  status      String   @default("processing") // processing | ready | failed
+  error       String?
+  slideCount  Int      @default(0) @map("slide_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  slides  Slide[]
+  lectures Lecture[]
+
+  @@index([teacherId])
+  @@map("presentations")
+}
+
+model Slide {
+  id            String  @id @default(uuid())
+  presentationId String @map("presentation_id")
+  presentation  Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+  index         Int
+  imagePath     String? @map("image_path") // относительный путь PNG в storage, null для слайдов-вопросов
+  isGenerated   Boolean @default(false) @map("is_generated")
+
+  poll Poll?
+
+  @@unique([presentationId, index])
+  @@map("slides")
+}
+
+model Poll {
+  id           String   @id @default(uuid())
+  slideId      String   @unique @map("slide_id")
+  slide        Slide    @relation(fields: [slideId], references: [id], onDelete: Cascade)
+  questionText String   @map("question_text")
+  type         String // single | multiple | ranking
+  required     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  options PollOption[]
+  answers Answer[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id       String @id @default(uuid())
+  pollId   String @map("poll_id")
+  poll     Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  text     String
+  position Int
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model Lecture {
+  id               String    @id @default(uuid())
+  teacherId        String    @map("teacher_id")
+  teacher          User      @relation(fields: [teacherId], references: [id])
+  presentationId   String    @map("presentation_id")
+  presentation     Presentation @relation(fields: [presentationId], references: [id])
+  title            String
+  course           String?
+  status           String    @default("active") // active | finished
+  voteCode         String    @unique @map("vote_code")
+  linkAnswers      Boolean   @default(true) @map("link_answers")
+  currentSlideIndex Int      @default(0) @map("current_slide_index")
+  slideCount       Int       @map("slide_count")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  endedAt          DateTime? @map("ended_at")
+
+  answers Answer[]
+
+  @@index([teacherId, startedAt])
+  @@map("lectures")
+}
+
+model Answer {
+  id               String   @id @default(uuid())
+  lectureId        String   @map("lecture_id")
+  lecture          Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  pollId           String   @map("poll_id")
+  poll             Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  pseudonym        String // HMAC(anonymous_id, salt) — без связывания: соль включает pollId
+  selectedOptionIds Json?   @map("selected_option_ids") // string[]
+  rankingOrder     Json?    @map("ranking_order") // string[] в порядке ранжирования
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([lectureId, pollId, pseudonym])
+  @@index([pollId])
+  @@map("answers")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String // auth.login, presentation.upload, lecture.start, ...
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  meta       Json?
+  ip         String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
