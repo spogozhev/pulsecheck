@@ -53,6 +53,8 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
     // имитируем одобрение администратором (сам admin-API проверяется в сценарии модерации ниже)
     await prisma.user.update({ where: { id: res.body.user.id }, data: { status: 'approved' } });
     expect(csrf).toBeTruthy();
+    process.env.TEST_USER_EMAIL = email;
+    process.env.TEST_USER_PASSWORD = 'test-password-123';
   });
 
   it('без сессии доступ к кабинету запрещён', async () => {
@@ -129,6 +131,9 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
     process.env.TEST_SLIDE_ID = slideId;
     process.env.TEST_POLL_OPTION_IDS = JSON.stringify(
       (poll.body.options as { id: string }[]).map((o) => o.id),
+    );
+    process.env.TEST_POLL_OPTION_TEXTS = JSON.stringify(
+      (poll.body.options as { text: string }[]).map((o) => o.text),
     );
   });
 
@@ -242,8 +247,97 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
   });
 });
 
-describe('Модерация: подтверждение аккаунтов администратором', () => {
+describe('Portable: экспорт и импорт презентации (§3.5 ТЗ)', () => {
   let app: INestApplication;
+  let cookies: string[] = [];
+  let csrf = '';
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.use(cookieParser());
+    app.use(csrfMiddleware);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, transformOptions: { enableImplicitConversion: true } }),
+    );
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const authHeaders = () => ({ Cookie: cookies.join('; '), 'x-csrf-token': csrf });
+
+  it('экспорт → импорт сохраняет слайды, картинки и опросы', async () => {
+    // сессия: административный вход тестовым преподавателем из золотого пути
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({
+        email: process.env.TEST_USER_EMAIL,
+        password: process.env.TEST_USER_PASSWORD,
+      })
+      .expect(200);
+    const setCookies = login.headers['set-cookie'] ?? [];
+    cookies = (Array.isArray(setCookies) ? setCookies : [setCookies]).map((c) => c.split(';')[0]);
+    csrf = cookies.find((c) => c.startsWith('csrf='))?.split('=')[1] ?? '';
+
+    // экспорт презентации с опросом из золотого пути
+    const exportRes = await request(app.getHttpServer())
+      .get(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/export`)
+      .set(authHeaders())
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (d) => chunks.push(d as Buffer));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(exportRes.headers['content-type']).toContain('application/zip');
+    expect(exportRes.body.length).toBeGreaterThan(1000);
+
+    // импорт того же архива
+    const imported = await request(app.getHttpServer())
+      .post('/api/presentations/import')
+      .set(authHeaders())
+      .attach('file', exportRes.body, { filename: 'roundtrip.pulsecheck.zip', contentType: 'application/zip' })
+      .expect(201);
+    expect(imported.body.status).toBe('ready');
+    expect(imported.body.slideCount).toBe(2);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/presentations/${imported.body.id}`)
+      .set(authHeaders())
+      .expect(200);
+    expect(detail.body.slides).toHaveLength(2);
+    expect(detail.body.slides[0].imagePath).toMatch(/\.png$/);
+
+    const originalPoll = JSON.parse(process.env.TEST_POLL_OPTION_TEXTS!);
+    const poll = detail.body.slides[0].poll;
+    expect(poll.questionText).toBe('Любимый формат лекций?');
+    expect(poll.type).toBe('single');
+    expect(poll.options.map((o: { text: string }) => o.text)).toEqual(originalPoll);
+
+    // картинка импортированного слайда отдаётся
+    const imageFile = detail.body.slides[0].imagePath.split('/').pop();
+    await request(app.getHttpServer())
+      .get(`/api/storage/slides/${detail.body.slides[0].presentationId}/${imageFile}`)
+      .set(authHeaders())
+      .expect(200);
+  });
+
+  it('чужой/битый архив отклоняется с понятной ошибкой', async () => {
+    const bad = await request(app.getHttpServer())
+      .post('/api/presentations/import')
+      .set(authHeaders())
+      .attach('file', Buffer.from('not a zip'), { filename: 'bad.zip', contentType: 'application/zip' })
+      .expect(400);
+    expect(bad.body.message).toBeTruthy();
+  });
+});
+
+describe('Модерация: подтверждение аккаунтов администратором', () => {  let app: INestApplication;
   let prisma: PrismaService;
   const stamp = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const teacher = { email: `pending-${stamp}@slide.local`, password: 'password-123456', name: 'Ожидающий' };

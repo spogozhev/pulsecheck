@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: slide
+          POSTGRES_PASSWORD: slide
+          POSTGRES_DB: slide_hz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U slide -d slide_hz"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      LIBREOFFICE_PATH: /usr/bin/soffice
+      TEST_DATABASE_URL: postgresql://slide:slide@localhost:5432/slide_hz_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Установка LibreOffice и psql-клиента
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice libreoffice-l10n-ru fonts-liberation postgresql-client
+      - name: Зависимости
+        run: npm install --no-audit --no-fund
+      - name: Prisma client
+        run: npx prisma generate
+        working-directory: server
+      - name: Тестовая БД
+        run: psql "postgresql://slide:slide@localhost:5432/postgres" -c "CREATE DATABASE slide_hz_test OWNER slide"
+      - name: Сборка и проверки типов
+        run: npm run build
+      - name: Тесты (unit + integration)
+        run: npm test

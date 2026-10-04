@@ -8,6 +8,7 @@ import type { Presentation } from '../api/types';
 export function PresentationsPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const list = useQuery({
@@ -33,6 +34,19 @@ export function PresentationsPage() {
     onError: (e) => setUploadError(e instanceof Error ? e.message : 'Ошибка загрузки'),
   });
 
+  const importZip = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Presentation>('/api/presentations/import', form);
+    },
+    onSuccess: () => {
+      setUploadError(null);
+      void qc.invalidateQueries({ queryKey: ['presentations'] });
+    },
+    onError: (e) => setUploadError(e instanceof Error ? e.message : 'Ошибка импорта'),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/presentations/${id}`),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['presentations'] }),
@@ -42,7 +56,26 @@ export function PresentationsPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-800">Презентации</h1>
-        <div>
+        <div className="flex gap-2">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) importZip.mutate(file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            className="btn-secondary"
+            onClick={() => importRef.current?.click()}
+            disabled={importZip.isPending}
+            title="Импорт portable-архива PulseCheck (.zip)"
+          >
+            {importZip.isPending ? 'Импорт…' : '⬆ Импорт архива'}
+          </button>
           <input
             ref={fileRef}
             type="file"

@@ -16,6 +16,7 @@ import { PresentationsModule } from './modules/presentations/presentations.modul
 import { LecturesModule } from './modules/lectures/lectures.module';
 import { VoteModule } from './modules/vote/vote.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { StorageModule } from './modules/storage/storage.module';
     LecturesModule,
     VoteModule,
     StorageModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

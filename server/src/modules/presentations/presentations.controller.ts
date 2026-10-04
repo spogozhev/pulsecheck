@@ -18,6 +18,7 @@ import { IsString, MaxLength, MinLength } from 'class-validator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditService } from '../audit/audit.service';
 import { PresentationsService } from './presentations.service';
+import { PortableService } from './portable.service';
 
 class UpdatePresentationDto {
   @IsString()
@@ -32,6 +33,7 @@ class UpdatePresentationDto {
 export class PresentationsController {
   constructor(
     private readonly presentations: PresentationsService,
+    private readonly portable: PortableService,
     private readonly audit: AuditService,
   ) {}
 
@@ -86,6 +88,44 @@ export class PresentationsController {
     await this.presentations.remove(id, user);
     void this.audit.log(req, 'presentation.delete', { entityType: 'presentation', entityId: id });
     return { ok: true };
+  }
+
+  @Post('import')
+  @ApiOperation({ summary: 'Импорт презентации из portable-архива PulseCheck (.zip)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 300 * 1024 * 1024 } }))
+  async importZip(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body('title') title: unknown,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+  ) {
+    const presentation = await this.portable.importZip(
+      file,
+      typeof title === 'string' ? title : undefined,
+      user,
+    );
+    void this.audit.log(req, 'presentation.import', {
+      entityType: 'presentation',
+      entityId: presentation.id,
+    });
+    return presentation;
+  }
+
+  @Get(':id/export')
+  @ApiOperation({ summary: 'Экспорт презентации в portable-архив (.zip): слайды, опросы, оригинал' })
+  async exportZip(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName } = await this.portable.exportZip(id, user);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="export.zip"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    res.send(buffer);
   }
 
   @Get(':id/original')

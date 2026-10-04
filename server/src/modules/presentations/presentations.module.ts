@@ -8,6 +8,7 @@ import { SlidesService } from './slides.service';
 import { PollsService } from './polls.service';
 import { ConverterService } from './converter.service';
 import { ConversionProcessor } from './conversion.processor';
+import { PortableService } from './portable.service';
 import { CONVERSION_QUEUE } from './conversion.constants';
 
 @Module({
@@ -23,7 +24,14 @@ import { CONVERSION_QUEUE } from './conversion.constants';
     }),
   ],
   controllers: [PresentationsController, SlidesController, PollsController],
-  providers: [PresentationsService, SlidesService, PollsService, ConverterService, ConversionProcessor],
+  providers: [
+    PresentationsService,
+    SlidesService,
+    PollsService,
+    ConverterService,
+    ConversionProcessor,
+    PortableService,
+  ],
   exports: [PresentationsService],
 })
 export class PresentationsModule {}

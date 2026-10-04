@@ -137,6 +137,9 @@ export function PresentationDetailPage() {
           </span>
         )}
         <div className="ml-auto flex flex-wrap gap-2">
+          <a className="btn-secondary" href={`/api/presentations/${id}/export`} title="Portable-архив: слайды, опросы и оригинал">
+            ⬇ Экспорт (.zip)
+          </a>
           <a className="btn-secondary" href={`/api/presentations/${id}/original`}>
             Оригинал
           </a>
