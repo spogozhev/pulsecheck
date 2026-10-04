@@ -15,7 +15,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white p-4">
-        <Link to="/presentations" className="mb-6 px-2">
+        <Link to="/presentations" className="mb-6">
           <Logo />
         </Link>
         <nav className="space-y-1">
