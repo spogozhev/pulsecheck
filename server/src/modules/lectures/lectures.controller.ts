@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -28,9 +28,21 @@ export class LecturesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'История лекций (фильтры: from, to, course, status)' })
+  @ApiOperation({ summary: 'История лекций (фильтры: from, to, course, status; пагинация: page, pageSize)' })
   async list(@Query() dto: ListLecturesDto, @CurrentUser() user: AuthUser) {
     return this.lectures.list(dto, user);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Удалить завершённую лекцию вместе с ответами (активную удалить нельзя)' })
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+  ) {
+    await this.lectures.remove(id, user);
+    void this.audit.log(req, 'lecture.delete', { entityType: 'lecture', entityId: id });
+    return { ok: true };
   }
 
   @Get(':id')

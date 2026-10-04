@@ -250,8 +250,8 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .get('/api/lectures?course=Интеграция')
       .set(authHeaders())
       .expect(200);
-    expect(lectures.body).toHaveLength(1);
-    const lectureId = lectures.body[0].id;
+    expect(lectures.body.items).toHaveLength(1);
+    const lectureId = lectures.body.items[0].id;
 
     const analytics = await request(app.getHttpServer())
       .get(`/api/lectures/${lectureId}/analytics`)
@@ -272,6 +272,48 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .set(authHeaders())
       .expect(200);
     expect(json.body.rawAnswers).toHaveLength(2);
+  });
+
+  it('пагинация списка и удаление завершённой лекции', async () => {
+    // форма постраничного ответа
+    const page1 = await request(app.getHttpServer())
+      .get('/api/lectures?page=1&pageSize=1')
+      .set(authHeaders())
+      .expect(200);
+    expect(Array.isArray(page1.body.items)).toBe(true);
+    expect(page1.body.items).toHaveLength(1);
+    expect(page1.body.total).toBeGreaterThanOrEqual(1);
+    expect(page1.body.page).toBe(1);
+    expect(page1.body.pageCount).toBeGreaterThanOrEqual(1);
+
+    const lectureId = page1.body.items.find((l: { course: string }) => l.course === 'Интеграция')?.id;
+    expect(lectureId).toBeTruthy();
+
+    // активную лекцию удалить нельзя
+    await request(app.getHttpServer())
+      .delete(`/api/lectures/${lectureId}`)
+      .set(authHeaders())
+      .expect(409);
+
+    // завершаем и удаляем — ответы удаляются каскадом
+    await request(app.getHttpServer())
+      .post(`/api/lectures/${lectureId}/finish`)
+      .set(authHeaders())
+      .expect(201);
+    await request(app.getHttpServer())
+      .delete(`/api/lectures/${lectureId}`)
+      .set(authHeaders())
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/lectures/${lectureId}/analytics`)
+      .set(authHeaders())
+      .expect(404);
+
+    const after = await request(app.getHttpServer())
+      .get('/api/lectures?course=Интеграция')
+      .set(authHeaders())
+      .expect(200);
+    expect(after.body.total).toBe(0);
   });
 });
 

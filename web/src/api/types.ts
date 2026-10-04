@@ -71,6 +71,14 @@ export interface Lecture {
   presentation?: { id: string; title: string };
 }
 
+export interface LecturePage {
+  items: Lecture[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+}
+
 export interface OptionResult {
   id: string;
   text: string;

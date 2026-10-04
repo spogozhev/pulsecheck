@@ -99,12 +99,36 @@ export class LecturesService {
         where.startedAt.lte = to;
       }
     }
-    const lectures = await this.prisma.lecture.findMany({
-      where,
-      orderBy: { startedAt: 'desc' },
-      include: { presentation: { select: { id: true, title: true } } },
-    });
-    return this.decorate(lectures);
+
+    const page = dto.page ?? 1;
+    const pageSize = dto.pageSize ?? 10;
+    const [items, total] = await Promise.all([
+      this.prisma.lecture.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { presentation: { select: { id: true, title: true } } },
+      }),
+      this.prisma.lecture.count({ where }),
+    ]);
+
+    return {
+      items: await this.decorate(items),
+      total,
+      page,
+      pageSize,
+      pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
+  /** Удаление завершённой лекции вместе с её ответами. Активную лекцию удалять нельзя. */
+  async remove(id: string, user: AuthUser) {
+    const lecture = await this.getOwned(id, user);
+    if (lecture.status === 'active') {
+      throw new ConflictException('Сначала завершите лекцию — активную сессию удалить нельзя');
+    }
+    await this.prisma.lecture.delete({ where: { id } }); // ответы удаляются каскадом
   }
 
   /** Текущее состояние лекции для presenter view (поллинг каждые 2-3 с). */

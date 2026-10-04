@@ -1,9 +1,11 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -48,4 +50,15 @@ export class ListLecturesDto {
   @IsOptional()
   @IsIn(['active', 'finished'])
   status?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  pageSize?: number;
 }
