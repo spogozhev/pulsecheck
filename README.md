@@ -24,6 +24,14 @@ QR-коду с телефона; при переходе к следующему
   `anonymous_id` (cookie + localStorage); связывание ответов одного студента между вопросами —
   через необратимый псевдоним HMAC с солью преподавателя (всегда включено, только в рамках лекции).
 - **Аналитика и экспорт**: распределения, темпы голосований, число участников; экспорт CSV/JSON.
+- **Математические формулы**: LaTeX в вопросе и вариантах — заключите в `$...$`
+  (например, `$x^2-2x+1=0$`); рендерится через KaTeX на слайде, у студентов и в итогах.
+- **Ограничение времени опроса**: обратный отсчёт на слайде и у студентов; по истечении опрос
+  закрывается и итоги показываются автоматически.
+- **Курс/дисциплина как тег**: презентации помечаются курсом, карточки фильтруются кликом по
+  тегу `#курс`; запускаемые лекции наследуют курс для истории.
+- **Профиль и восстановление пароля**: смена имени, email (с подтверждением паролем) и пароля;
+  восстановление по email через одноразовую ссылку (30 минут, SMTP).
 - Аутентификация преподавателей: email+пароль (bcrypt), сессия в httpOnly-cookie, CSRF-защита,
   rate-limiting, аудит действий.
 - **Модерация**: новые регистрации ожидают подтверждения администратора; до одобрения доступны
@@ -78,26 +86,35 @@ npm run dev          # API на :3001 (nest watch), веб на :5180 (vite)
 
 ## Тесты
 
-`npm test` — 27 тестов: unit (агрегация результатов, валидация ответов, псевдонимизация) и
-интеграционные («золотой путь»: регистрация → загрузка PDF → конвертация → опрос → лекция →
-голосование → закрытие → аналитика → экспорт; roundtrip portable-экспорта/импорта; сценарий
-модерации: pending → 403 → одобрение админом → доступ). Тесты используют отдельную БД
-`slide_hz_test` и Redis db 1, dev-данные не затрагиваются.
+`npm test` — 35 тестов: unit (агрегация результатов, валидация ответов, псевдонимизация) и
+интеграционные: «золотой путь» (регистрация → загрузка PDF → конвертация → опрос → лекция →
+голосование → закрытие → аналитика → экспорт), roundtrip portable-экспорта/импорта, вставка
+слайда в середину большой презентации (уникальность индексов), копирование опроса между слайдами,
+опрос с ограничением времени, сценарий модерации, профиль и восстановление пароля. Тесты используют
+отдельную БД `slide_hz_test` и Redis db 1, dev-данные не затрагиваются.
 
 ## Конфигурация
 
 Все переменные — в `server/.env` (шаблон с комментариями: `server/.env.example`):
 `PORT`, `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `STORAGE_DIR`, `LIBREOFFICE_PATH`,
-`WEB_ORIGIN`, `PUBLIC_BASE_URL`.
+`WEB_ORIGIN`, `PUBLIC_BASE_URL`, а также `SMTP_HOST/PORT/USER/PASS` и `MAIL_FROM`
+для писем о восстановлении пароля (без SMTP_HOST — dev-режим с выводом письма в консоль).
 
 ## Структура
 
 ```
 server/               NestJS API
-  prisma/schema.prisma   модель данных (users, presentations, slides, polls, lectures, answers, audit)
-  src/modules/           auth, presentations (конвертация), lectures, vote (публичное), storage, audit
+  prisma/schema.prisma  модель данных (users, presentations, slides, polls, lectures, answers,
+                        password_reset_tokens, audit)
+  src/modules/          auth, presentations (конвертация, portable), lectures, vote (публичное),
+                        profile, admin, health, storage, audit
+  src/shared/           mail.service (SMTP / dev-режим)
 web/                  React SPA
-  src/pages/             Login, Presentations, PresentationDetail, Lectures, LectureDetail, Present, Vote
+  src/pages/            Login, PasswordRecovery, Presentations, PresentationDetail, Lectures,
+                        LectureDetail, Present, Vote, Profile, AdminUsers
+  src/components/       Logo, PollBuilder, ResultsView, CopySlidesDialog, MathText, Countdown
+ops/backup.sh         резервное копирование (БД + хранилище)
+.github/workflows/    CI: сборка и тесты
 docs/                 руководства
 storage/              файловое хранилище (оригиналы + PNG слайдов; gitignored)
 ```
