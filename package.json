@@ -18,7 +18,8 @@
     "seed": "npm run seed -w server",
     "build": "npm run build -w server && npm run build -w web",
     "test": "npm run test -w server",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "make:presentation": "npm run make:project-presentation -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
