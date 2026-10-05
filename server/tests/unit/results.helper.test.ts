@@ -12,6 +12,7 @@ const poll = (type: string) => ({
   questionText: 'Q',
   type,
   required: true,
+  timeLimitSeconds: null,
   createdAt: new Date(),
   options,
 });
