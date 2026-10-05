@@ -22,6 +22,7 @@ interface ManifestPoll {
   questionText: string;
   type: string;
   required?: boolean;
+  timeLimitSeconds?: number | null;
   options: ManifestPollOption[];
 }
 
@@ -81,6 +82,7 @@ export class PortableService {
           questionText: slide.poll.questionText,
           type: slide.poll.type,
           required: slide.poll.required,
+          timeLimitSeconds: slide.poll.timeLimitSeconds,
           options: [...slide.poll.options]
             .sort((a, b) => a.position - b.position)
             .map((o) => ({ text: o.text, position: o.position })),
@@ -164,6 +166,7 @@ export class PortableService {
                   questionText: slide.poll.questionText,
                   type: slide.poll.type,
                   required: slide.poll.required ?? true,
+                  timeLimitSeconds: slide.poll.timeLimitSeconds ?? null,
                   options: {
                     create: [...slide.poll.options]
                       .sort((a, b) => a.position - b.position)
@@ -220,6 +223,11 @@ export class PortableService {
       for (const option of poll.options) {
         if (typeof option?.text !== 'string' || option.text.trim().length === 0) {
           throw new BadRequestException('Пустой вариант ответа в манифесте');
+        }
+      }
+      if (poll.timeLimitSeconds !== undefined && poll.timeLimitSeconds !== null) {
+        if (!Number.isInteger(poll.timeLimitSeconds) || poll.timeLimitSeconds < 5 || poll.timeLimitSeconds > 3600) {
+          throw new BadRequestException('Ограничение времени в манифесте: от 5 до 3600 секунд');
         }
       }
     }

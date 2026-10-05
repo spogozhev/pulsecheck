@@ -416,6 +416,19 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
     expect(source).toBeTruthy();
     expect(target).toBeTruthy();
 
+    // у источника есть ограничение времени — оно копируется вместе с опросом
+    await request(app.getHttpServer())
+      .put(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${source.id}/poll`)
+      .set(authHeaders())
+      .send({
+        questionText: 'Любимый формат лекций?',
+        type: 'single',
+        required: true,
+        timeLimitSeconds: 300,
+        options: [{ text: 'Очный' }, { text: 'Онлайн' }, { text: 'Гибрид' }],
+      })
+      .expect(200);
+
     const copy = await request(app.getHttpServer())
       .post(
         `/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${target.id}/poll/copy`,
@@ -424,6 +437,7 @@ describe('Интеграция: золотой путь (§13 ТЗ)', () => {
       .send({ fromSlideId: source.id })
       .expect(201);
     expect(copy.body.questionText).toBe('Любимый формат лекций?');
+    expect(copy.body.timeLimitSeconds).toBe(300);
     expect(copy.body.options).toHaveLength(3);
     expect(copy.body.options[0].text).toBe('Очный');
 
@@ -571,6 +585,19 @@ describe('Portable: экспорт и импорт презентации (§3.5
     cookies = (Array.isArray(setCookies) ? setCookies : [setCookies]).map((c) => c.split(';')[0]);
     csrf = cookies.find((c) => c.startsWith('csrf='))?.split('=')[1] ?? '';
 
+    // ограничение времени на исходном опросе — должно пережить экспорт/импорт
+    await request(app.getHttpServer())
+      .put(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/slides/${process.env.TEST_SLIDE_ID}/poll`)
+      .set(authHeaders())
+      .send({
+        questionText: 'Любимый формат лекций?',
+        type: 'single',
+        required: true,
+        timeLimitSeconds: 120,
+        options: [{ text: 'Очный' }, { text: 'Онлайн' }, { text: 'Гибрид' }],
+      })
+      .expect(200);
+
     // экспорт презентации с опросом из золотого пути
     const exportRes = await request(app.getHttpServer())
       .get(`/api/presentations/${process.env.TEST_PRESENTATION_ID}/export`)
@@ -605,6 +632,7 @@ describe('Portable: экспорт и импорт презентации (§3.5
     const poll = detail.body.slides[0].poll;
     expect(poll.questionText).toBe('Любимый формат лекций?');
     expect(poll.type).toBe('single');
+    expect(poll.timeLimitSeconds).toBe(120);
     expect(poll.options.map((o: { text: string }) => o.text)).toEqual(originalPoll);
 
     // картинка импортированного слайда отдаётся
