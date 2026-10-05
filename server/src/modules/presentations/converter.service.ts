@@ -16,9 +16,12 @@ export interface RasterizedPage {
   fileName: string;
 }
 
+/** Целевая ширина PNG-слайдов в пикселях — меняется здесь. */
+export const SLIDE_TARGET_WIDTH = 1920;
+
 /**
  * Конвертация исходников в PNG-слайды:
- *   PPTX --LibreOffice--> PDF --pdf-to-img--> PNG (scale 2)
+ *   PPTX --LibreOffice--> PDF --pdf-to-img--> PNG (ширина SLIDE_TARGET_WIDTH, по умолчанию 1920 px)
  *   PDF --------------------------> PNG
  */
 @Injectable()
@@ -84,10 +87,19 @@ export class ConverterService {
     return pdfPath;
   }
 
-  /** Растеризует PDF в PNG-файлы вида 001.png, 002.png, ... в outDir. */
+  /** Растеризует PDF в PNG-файлы вида 001.png, 002.png, ... в outDir.
+   *  Ширина картинок приводится к SLIDE_TARGET_WIDTH (1920 px) независимо от исходника. */
   async rasterizePdf(pdfInput: string | Buffer, outDir: string): Promise<RasterizedPage[]> {
     const { pdf } = await this.loadPdfLib();
-    const document = await pdf(pdfInput, { scale: 2 });
+
+    // пробный рендер первой страницы при scale 1 — измеряем её ширину в пикселях,
+    // чтобы вычислить масштаб под целевую ширину слайда
+    const probe = await pdf(pdfInput, { scale: 1 });
+    const probePng = await probe.getPage(1);
+    const pageWidthPx = probePng.readUInt32BE(16); // ширина из заголовка PNG (IHDR)
+    const scale = SLIDE_TARGET_WIDTH / pageWidthPx;
+
+    const document = await pdf(pdfInput, { scale });
     const pageCount = document.length;
     if (!pageCount) throw new Error('PDF не содержит страниц');
 
