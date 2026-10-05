@@ -17,11 +17,11 @@ export interface RasterizedPage {
 }
 
 /** Целевая ширина PNG-слайдов в пикселях — меняется здесь. */
-export const SLIDE_TARGET_WIDTH = 1920;
+export const SLIDE_TARGET_WIDTH = 2560;
 
 /**
  * Конвертация исходников в PNG-слайды:
- *   PPTX --LibreOffice--> PDF --pdf-to-img--> PNG (ширина SLIDE_TARGET_WIDTH, по умолчанию 1920 px)
+ *   PPTX --LibreOffice--> PDF --pdf-to-img--> PNG (ширина SLIDE_TARGET_WIDTH, по умолчанию 2560 px)
  *   PDF --------------------------> PNG
  */
 @Injectable()
@@ -88,7 +88,7 @@ export class ConverterService {
   }
 
   /** Растеризует PDF в PNG-файлы вида 001.png, 002.png, ... в outDir.
-   *  Ширина картинок приводится к SLIDE_TARGET_WIDTH (1920 px) независимо от исходника. */
+   *  Ширина картинок приводится к SLIDE_TARGET_WIDTH (2560 px) независимо от исходника. */
   async rasterizePdf(pdfInput: string | Buffer, outDir: string): Promise<RasterizedPage[]> {
     const { pdf } = await this.loadPdfLib();
 

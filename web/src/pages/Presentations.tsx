@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import type { Presentation } from '../api/types';
 
 export function PresentationsPage() {
@@ -62,7 +62,11 @@ export function PresentationsPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/presentations/${id}`),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['presentations'] }),
+    onSuccess: () => {
+      setUploadError(null);
+      void qc.invalidateQueries({ queryKey: ['presentations'] });
+    },
+    onError: (e) => setUploadError(e instanceof ApiError ? e.message : 'Ошибка удаления'),
   });
 
   return (
