@@ -1,8 +1,13 @@
 // Генерирует презентацию проекта PulseCheck для преподавателей:
 //   npx tsx scripts/make-project-presentation.ts
-// Результат: PulseCheck-презентация.pptx в корне проекта.
-import { fileURLToPath } from 'node:url';
+// Результат: PulseCheck.pptx в корне проекта.
+import { existsSync, renameSync } from 'node:fs';
+import path from 'node:path';
 import PptxGenJS from 'pptxgenjs';
+
+// фирменный логотип в PNG (конвертируется из SVG: см. test-assets)
+const LOGO_PNG = [path.resolve(process.cwd(), 'test-assets/pulsecheck-logo.png'),
+  path.resolve(process.cwd(), '../test-assets/pulsecheck-logo.png')].find(existsSync);
 
 const SKY = '0284C7';
 const DARK = '0F172A';
@@ -23,26 +28,6 @@ pptx.title = 'PulseCheck — интерактивные опросы на лек
 
 // --- помощники ---
 
-/** Линия ЭКГ из сегментов (фирменный знак). */
-function ecg(slide: PptxGenJS.Slide, x: number, y: number, scale = 1, color = SKY) {
-  const pts: Array<[number, number]> = [
-    [0, 20], [26, 20], [32, 20], [38, 4], [46, 30], [54, 8], [60, 20],
-    [68, 20], [76, 27], [88, 6], [96, 20],
-  ];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [x1, y1] = pts[i];
-    const [x2, y2] = pts[i + 1];
-    slide.addShape('line', {
-      x: x + x1 * scale,
-      y: y + y1 * scale,
-      w: (x2 - x1) * scale,
-      h: (y2 - y1) * scale,
-      flipV: y2 < y1,
-      line: { color, width: 2.5 },
-    });
-  }
-}
-
 /** Заголовок раздела с акцентной полосой. */
 function title(slide: PptxGenJS.Slide, text: string) {
   slide.addShape('rect', { x: 0.55, y: 0.55, w: 0.12, h: 0.85, fill: { color: SKY } });
@@ -62,22 +47,19 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
   );
 }
 
-// --- Слайд 1. Титул ---
+// --- Слайд 1. Титул --- , h: 1.38 '7DD3FC' 'CBD5E1'
 {
   const s = pptx.addSlide();
-  s.background = { color: DARK };
-  ecg(s, 0.6, 0.6, 0.115);
-  s.addText('PulseCheck', {
-    x: 0.5, y: 2.2, w: 12, h: 1.4, fontSize: 60, bold: true, color: WHITE, fontFace: 'Segoe UI',
-  });
+  s.background = { color: WHITE };
+  s.addImage({ path: LOGO_PNG, x: 0.55, y: 0.7, w: 8.0, h: 2.38 });
   s.addText('Интерактивные опросы прямо на лекции', {
-    x: 0.55, y: 3.6, w: 12, h: 0.8, fontSize: 28, color: '7DD3FC', fontFace: 'Segoe UI',
+    x: 0.55, y: 3.6, w: 12, h: 0.8, fontSize: 28, color: DARK, fontFace: 'Segoe UI',
   });
   s.addText('Превратите презентацию в диалог с аудиторией', {
-    x: 0.55, y: 4.6, w: 12, h: 0.7, fontSize: 20, color: 'CBD5E1', fontFace: 'Segoe UI',
+    x: 0.55, y: 4.6, w: 12, h: 0.7, fontSize: 20, color: GRAY, fontFace: 'Segoe UI',
   });
   s.addShape('line', { x: 0.6, y: 6.4, w: 3.2, h: 0, line: { color: SKY, width: 2 } });
-  s.addText('Для преподавателей университетов', {
+  s.addText('Для преподавателей', {
     x: 0.55, y: 6.55, w: 8, h: 0.5, fontSize: 14, color: '94A3B8', fontFace: 'Segoe UI',
   });
 }
@@ -103,7 +85,7 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
   title(s, 'PulseCheck — опросы поверх вашей презентации');
   const rows: Array<[string, string]> = [
     ['Ваши слайды', 'Загрузите PDF или PowerPoint — вопросы добавляются на любые слайды'],
-    ['Телефон вместо raises руки', 'Студенты отвечают с телефона: отсканировали QR — и всё'],
+    ['Телефон вместо поднятой руки', 'Студенты отвечают с телефона: отсканировали QR — и всё'],
     ['Результаты вживую', 'Диаграмма ответов — на экране, пока аудитория ещё в зале'],
     ['Анонимно', 'Без регистрации и установки приложений'],
   ];
@@ -227,8 +209,8 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
     [
       { text: 'Решите уравнение:  ', options: { fontSize: 22, color: TEXT } },
       { text: 'x', options: { fontSize: 22, italic: true, color: TEXT } },
-      { text: '2', options: { fontSize: 14, superscript: true, color: TEXT } },
-      { text: ' − 2x + 1 = 0.', options: { fontSize: 22, color: TEXT } },
+      { text: '2', options: { fontSize: 22, superscript: true, color: TEXT } },
+      { text: ' − 2 x + 1 = 0.', options: { fontSize: 22, color: TEXT } },
     ],
     { x: 1.3, y: 4.3, w: W - 2.6, h: 1.1, valign: 'middle', fontFace: 'Segoe UI' },
   );
@@ -279,6 +261,9 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
   const s = pptx.addSlide();
   s.background = { color: WHITE };
   title(s, 'Попробовать — три команды');
+  s.addText('https://github.com/spogozhev/pulsecheck', {
+    x: 1.0, y: 1.25, w: 8, h: 0.5, fontSize: 16, color: TEXT, fontFace: 'Segoe UI',
+  });
   const cmds: Array<[string, string]> = [
     ['npm install', 'зависимости'],
     ['npm run setup', 'база данных и администратор'],
@@ -312,13 +297,17 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
 // --- Слайд 11. Финал ---
 {
   const s = pptx.addSlide();
-  s.background = { color: DARK };
-  ecg(s, 0.6, 0.6, 0.115);
+  s.background = { color: WHITE };
+  s.addImage({ path: LOGO_PNG, x: 0.55, y: 0.7, w: 4.6, h: 1.38 });
+  s.addText('Для преподавателей', {
+    x: 0.55, y: 2.2, w: 8, h: 0.5, fontSize: 14, color: '94A3B8', fontFace: 'Segoe UI',
+  });
+
   s.addText('Лекция, на которой отвечают', {
-    x: 0.5, y: 2.4, w: 12, h: 1.2, fontSize: 44, bold: true, color: WHITE, fontFace: 'Segoe UI',
+    x: 0.5, y: 2.85, w: 12, h: 1.2, fontSize: 44, bold: true, color: DARK, fontFace: 'Segoe UI',
   });
   s.addText('PulseCheck — задайте вопрос уже на следующей паре', {
-    x: 0.55, y: 3.8, w: 12, h: 0.8, fontSize: 24, color: '7DD3FC', fontFace: 'Segoe UI',
+    x: 0.55, y: 4.25, w: 12, h: 0.8, fontSize: 24, color: '7DD3FC', fontFace: 'Segoe UI',
   });
   s.addShape('line', { x: 0.6, y: 5.6, w: 3.2, h: 0, line: { color: SKY, width: 2 } });
   s.addText('demo@slide.local  /  demo12345', {
@@ -327,5 +316,9 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
 }
 
 // путь не зависит от cwd: файл всегда кладётся в корень проекта
-const outPath = fileURLToPath(new URL('../../PulseCheck-презентация.pptx', import.meta.url));
-pptx.writeFile({ fileName: outPath }).then((f) => console.log('OK:', f));
+const tmpPath = path.resolve(process.cwd(), '../PulseCheck-deck-tmp.pptx');
+const outPath = path.resolve(process.cwd(), '../PulseCheck.pptx');
+pptx.writeFile({ fileName: tmpPath }).then(() => {
+  renameSync(tmpPath, outPath);
+  console.log('OK:', outPath);
+});
