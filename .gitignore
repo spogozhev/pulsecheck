@@ -12,8 +12,8 @@ coverage/
 .env*
 !.env.example
 
-# runtime data
-storage/
+# runtime data (якорь / — только каталог хранилища в корне, не код модуля storage)
+/storage/
 server/storage-test/
 backups/
 test-assets/
