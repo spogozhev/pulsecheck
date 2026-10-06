@@ -110,7 +110,7 @@ function bullets(slide: PptxGenJS.Slide, items: string[], opts: PptxGenJS.TextPr
   const s = pptx.addSlide();
   s.background = { color: WHITE };
   title(s, 'Как это работает — четыре шага');
-  const steps: Array<[string, string]> = [
+  const steps: Array<[string, string, string]> = [
     ['1', 'Загрузите PDF или PowerPoint', 'слайды распознаются автоматически'],
     ['2', 'Добавьте вопросы', 'на существующие слайды или отдельными слайдами-вопросами'],
     ['3', 'Запустите лекцию', 'QR-код появляется на вопросе сам, всё в один клик'],

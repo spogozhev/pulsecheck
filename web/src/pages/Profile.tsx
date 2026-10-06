@@ -7,6 +7,7 @@ import { useAuth } from '../state/auth';
 export function ProfilePage() {
   const { user, refresh } = useAuth();
   const qc = useQueryClient();
+  const isDemo = user?.isDemo === true;
 
   // --- имя и email ---
   const [name, setName] = useState(user?.name ?? '');
@@ -14,6 +15,8 @@ export function ProfilePage() {
   const [emailPassword, setEmailPassword] = useState('');
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [editName, setEditName] = useState(false);
+  const [editEmail, setEditEmail] = useState(false);
 
   const saveProfile = useMutation({
     mutationFn: () =>
@@ -71,10 +74,27 @@ export function ProfilePage() {
 
       <div className="card mb-6 p-5">
         <h2 className="mb-4 font-semibold text-slate-700">Имя и email</h2>
+        {isDemo && (
+          <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Это демонстрационный аккаунт: имя, email и пароль изменить нельзя.
+            Данные этого логина общие и восстановятся при обновлении демо-версии.
+          </div>
+        )}
         <div className="space-y-3">
           <div>
             <label className="label">Имя</label>
-            <input className="input" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
+            <input
+              className="input"
+              value={name}
+              maxLength={120}
+              disabled={isDemo || !editName}
+              onChange={(e) => setName(e.target.value)}
+            />
+            {!isDemo && !editName && (
+              <button className="mt-1 text-xs text-sky-600 hover:underline" onClick={() => setEditName(true)}>
+                Изменить имя
+              </button>
+            )}
           </div>
           <div>
             <label className="label">Email</label>
@@ -82,9 +102,15 @@ export function ProfilePage() {
               className="input"
               type="email"
               value={email}
+              disabled={isDemo || !editEmail}
               onChange={(e) => setEmail(e.target.value)}
             />
-            {emailChanged && (
+            {!isDemo && !editEmail && (
+              <button className="mt-1 text-xs text-sky-600 hover:underline" onClick={() => setEditEmail(true)}>
+                Изменить email
+              </button>
+            )}
+            {editEmail && (
               <div className="mt-1.5">
                 <label className="label">Текущий пароль — для подтверждения смены email</label>
                 <input
@@ -99,17 +125,25 @@ export function ProfilePage() {
         </div>
         {infoMsg && <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{infoMsg}</div>}
         {profileError && <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{profileError}</div>}
-        <button
-          className="btn-primary mt-4"
-          disabled={!profileValid || saveProfile.isPending}
-          onClick={() => saveProfile.mutate()}
-        >
-          {saveProfile.isPending ? 'Сохранение…' : 'Сохранить'}
-        </button>
+        {!isDemo && (
+          <button
+            className="btn-primary mt-4"
+            disabled={!profileValid || saveProfile.isPending}
+            onClick={() => saveProfile.mutate()}
+          >
+            {saveProfile.isPending ? 'Сохранение…' : 'Сохранить'}
+          </button>
+        )}
       </div>
 
       <div className="card p-5">
         <h2 className="mb-4 font-semibold text-slate-700">Смена пароля</h2>
+        {isDemo ? (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Для демо-аккаунта смена пароля недоступна.
+          </div>
+        ) : (
+        <>
         <div className="space-y-3">
           <div>
             <label className="label">Текущий пароль</label>
@@ -149,6 +183,8 @@ export function ProfilePage() {
         >
           {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
         </button>
+        </>
+        )}
       </div>
     </div>
   );

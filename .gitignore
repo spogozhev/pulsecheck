@@ -27,6 +27,7 @@ dev.out.log
 .claude/
 .z-ai-config/
 .zscripts/
+.zcodeignore
 prompt
 PROMPT.md
 AGENTS.md

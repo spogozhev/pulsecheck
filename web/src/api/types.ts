@@ -5,7 +5,9 @@ export interface User {
   email: string;
   name: string;
   role: string;
-  status: UserStatus;
+  status: string;
+  /** демо-аккаунт: имя, email и пароль не редактируются */
+  isDemo: boolean;
 }
 
 export interface AdminUserRow {

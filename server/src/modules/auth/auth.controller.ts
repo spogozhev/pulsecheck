@@ -8,6 +8,7 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { AuditService } from '../audit/audit.service';
 import { AuthService, IssuedSession } from './auth.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { PrismaService } from '../../prisma/prisma.service';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,6 +19,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    private readonly users: PrismaService,
   ) {}
 
   @Public()
@@ -63,7 +65,11 @@ export class AuthController {
   @Get('me')
   @ApiOperation({ summary: 'Текущий пользователь' })
   async me(@CurrentUser() user: AuthUser) {
-    return { user };
+    const full = await this.users.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, name: true, role: true, status: true, isDemo: true },
+    });
+    return { user: full };
   }
 
   private setCookies(res: Response, token: string): void {
