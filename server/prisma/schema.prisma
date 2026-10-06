@@ -16,6 +16,8 @@ model User {
   // pending | approved | blocked. Дефолт approved — для существующих пользователей при миграции;
   // новые регистрации создаются со статусом pending (см. AuthService.register) и требуют одобрения админом.
   status       String        @default("approved")
+  // демо-аккаунт: имя, email и пароль не редактируются (см. ProfileService)
+  isDemo       Boolean       @default(false) @map("is_demo")
   salt         String // соль для псевдонимизации anonymous_id (per-teacher)
   createdAt    DateTime      @default(now()) @map("created_at")
   presentations Presentation[]

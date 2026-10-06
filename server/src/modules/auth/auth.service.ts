@@ -12,7 +12,7 @@ import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 export interface IssuedSession {
   token: string;
-  user: { id: string; email: string; name: string; role: string; status: string };
+  user: { id: string; email: string; name: string; role: string; status: string; isDemo: boolean };
 }
 
 @Injectable()
@@ -36,7 +36,7 @@ export class AuthService {
         salt: randomBytes(16).toString('hex'),
       },
     });
-    return this.issue(user.id, user.email, user.name, user.role, user.status);
+    return this.issue(user.id, user.email, user.name, user.role, user.status, user.isDemo);
   }
 
   async login(dto: LoginDto): Promise<IssuedSession> {
@@ -47,7 +47,7 @@ export class AuthService {
     if (user.status === 'blocked') {
       throw new ForbiddenException('Аккаунт заблокирован администратором');
     }
-    return this.issue(user.id, user.email, user.name, user.role, user.status);
+    return this.issue(user.id, user.email, user.name, user.role, user.status, user.isDemo);
   }
 
   private async issue(
@@ -56,8 +56,9 @@ export class AuthService {
     name: string,
     role: string,
     status: string,
+    isDemo: boolean,
   ): Promise<IssuedSession> {
     const token = await this.jwtService.signAsync({ sub: id, role });
-    return { token, user: { id, email, name, role, status } };
+    return { token, user: { id, email, name, role, status, isDemo } };
   }
 }

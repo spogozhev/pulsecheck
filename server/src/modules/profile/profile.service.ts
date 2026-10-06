@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -29,6 +30,9 @@ export class ProfileService {
   async updateProfile(user: AuthUser, dto: ProfileUpdateCommand) {
     const me = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!me) throw new NotFoundException('Пользователь не найден');
+    if (me.isDemo) {
+      throw new ForbiddenException('Профиль демо-пользователя изменить нельзя');
+    }
 
     const data: { name?: string; email?: string } = {};
 
@@ -80,6 +84,9 @@ export class ProfileService {
     }
     const me = await this.prisma.user.findUnique({ where: { id: user.id } });
     if (!me) throw new NotFoundException('Пользователь не найден');
+    if (me.isDemo) {
+      throw new ForbiddenException('Профиль демо-пользователя изменить нельзя');
+    }
     if (!(await bcrypt.compare(currentPassword, me.passwordHash))) {
       throw new BadRequestException('Текущий пароль указан неверно');
     }
@@ -97,7 +104,8 @@ export class ProfileService {
     const emailNorm = email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email: emailNorm } });
 
-    if (user && user.status !== 'blocked') {
+    // демо-аккаунт: пароль не меняем (токен не создаём, ответ не меняется)
+    if (user && user.status !== 'blocked' && !user.isDemo) {
       // погасить прежние неиспользованные токены
       await this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
       const token = randomBytes(32).toString('hex');
