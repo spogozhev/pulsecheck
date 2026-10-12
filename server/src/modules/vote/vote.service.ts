@@ -14,6 +14,21 @@ type LectureWithTeacher = Lecture & { teacher: User };
 const ANON_COOKIE = 'anon';
 const ANON_COOKIE_MS = 400 * 24 * 60 * 60 * 1000;
 
+/** Кэш sessionState: студенты опрашивают её каждые 2 с, вся аудитория часто за одним IP.
+ * TTL 1 с снимает большую часть чтений с Postgres и не замедляет переключение вопросов.
+ * В тестах отключён — интеграционные проверки ожидают мгновенную консистентность. */
+const STATE_CACHE_TTL_MS = 1_000;
+const STATE_CACHE_MAX_ENTRIES = 5_000;
+
+type SessionStateValue = {
+  lectureTitle: string;
+  active: boolean;
+  slideIndex: number;
+  hasPoll: boolean;
+  questionOpen: boolean;
+  revealed: boolean;
+};
+
 @Injectable()
 export class VoteService {
   constructor(
@@ -21,11 +36,33 @@ export class VoteService {
     private readonly config: ConfigService,
   ) {}
 
+  private readonly stateCache = new Map<
+    string,
+    { value: SessionStateValue | null; notFound?: boolean; expiresAt: number }
+  >();
+  private readonly stateCacheEnabled = process.env.NODE_ENV !== 'test';
+
   /** Состояние сессии для страницы студента: какой вопрос сейчас активен. */
   async sessionState(code: string) {
-    const lecture = await this.prisma.lecture.findUnique({ where: { voteCode: code } });
-    if (!lecture) throw new NotFoundException('Сессия не найдена');
+    const cached = this.stateCacheEnabled ? this.stateCache.get(code) : undefined;
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.notFound) throw new NotFoundException('Сессия не найдена');
+      return cached.value;
+    }
 
+    const lecture = await this.prisma.lecture.findUnique({ where: { voteCode: code } });
+    if (!lecture) {
+      // неизвестные коды тоже кэшируются на 1 с — перебор кодов не нагружает БД
+      this.cacheSessionState(code, { value: null, notFound: true, expiresAt: Date.now() + STATE_CACHE_TTL_MS });
+      throw new NotFoundException('Сессия не найдена');
+    }
+
+    const value = await this.buildSessionState(lecture);
+    this.cacheSessionState(code, { value, expiresAt: Date.now() + STATE_CACHE_TTL_MS });
+    return value;
+  }
+
+  private async buildSessionState(lecture: Lecture) {
     const slide = await this.prisma.slide.findFirst({
       where: { presentationId: lecture.presentationId, index: lecture.currentSlideIndex },
       include: { poll: { select: { id: true, timeLimitSeconds: true } } },
@@ -41,6 +78,23 @@ export class VoteService {
       questionOpen: !!slide?.poll && this.isPollOpen(lecture, slide),
       revealed,
     };
+  }
+
+  private cacheSessionState(
+    code: string,
+    entry: { value: SessionStateValue | null; notFound?: boolean; expiresAt: number },
+  ) {
+    if (this.stateCache.size >= STATE_CACHE_MAX_ENTRIES) {
+      const now = Date.now();
+      for (const [key, value] of this.stateCache) {
+        if (value.expiresAt <= now) this.stateCache.delete(key);
+      }
+      if (this.stateCache.size >= STATE_CACHE_MAX_ENTRIES) {
+        const oldest = this.stateCache.keys().next().value;
+        if (oldest !== undefined) this.stateCache.delete(oldest);
+      }
+    }
+    this.stateCache.set(code, entry);
   }
 
   /** Открыт ли опрос: слайд текущий, лекция активна и не истекло время (если оно ограничено). */

@@ -12,6 +12,12 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
+  // Production за nginx: берём реальный IP клиента из X-Forwarded-For,
+  // иначе rate-limit считает всех пользователей одним IP (127.0.0.1)
+  if (config.get<boolean>('isProd')) {
+    app.set('trust proxy', 1);
+  }
+
   app.setGlobalPrefix('api');
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser());

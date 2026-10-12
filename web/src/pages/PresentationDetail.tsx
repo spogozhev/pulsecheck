@@ -5,7 +5,14 @@ import { api } from '../api/client';
 import type { Lecture, Presentation } from '../api/types';
 import { PollBuilder, PollDraft } from '../components/PollBuilder';
 import { CopySlidesDialog } from '../components/CopySlidesDialog';
+import { MathText } from '../components/MathText';
 import { useAuth } from '../state/auth';
+
+const TYPE_HINT: Record<string, string> = {
+  single: 'выбор одного варианта',
+  multiple: 'выбор нескольких вариантов',
+  ranking: 'ранжирование вариантов',
+};
 
 export function PresentationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -287,9 +294,32 @@ export function PresentationDetailPage() {
             <div className="flex min-h-56 items-center justify-center rounded-lg bg-slate-100 p-2">
               {slide.imagePath ? (
                 <img src={`/api/storage/${slide.imagePath}`} alt="" className="max-h-80" />
+              ) : slide.poll ? (
+                <div className="flex min-h-80 w-full items-center justify-center rounded-lg bg-slate-950 p-8">
+                  <div className="w-full max-w-2xl text-center">
+                    <div className="mb-3 text-xs uppercase tracking-widest text-sky-400">
+                      {TYPE_HINT[slide.poll.type]}
+                    </div>
+                    <div className="mb-6 text-2xl font-bold leading-snug text-white">
+                      <MathText text={slide.poll.questionText} />
+                    </div>
+                    <ol className="mx-auto max-w-lg space-y-2 text-left">
+                      {slide.poll.options.map((o, i) => (
+                        <li
+                          key={o.id}
+                          className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-2 text-lg text-slate-200"
+                        >
+                          <span className="mr-2 font-mono text-sm text-sky-400">{i + 1}.</span>
+                          <MathText text={o.text} />
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                </div>
               ) : (
                 <div className="p-8 text-center text-slate-400">
-                  Слайд-вопрос: отображается как полноэкранная заставка с текстом вопроса
+                  Слайд-вопрос: добавьте вопрос и варианты ответов — после сохранения
+                  здесь появится превью слайда, как он будет показан на лекции
                 </div>
               )}
             </div>
