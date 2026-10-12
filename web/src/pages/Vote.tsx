@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import type { VotePayload, VoteResultsResponse } from '../api/types';
 import { ResultsView } from '../components/ResultsView';
 import { Logo } from '../components/Logo';
@@ -104,7 +104,7 @@ export function VotePage() {
     queryKey: ['votePayload', code, viewSlide],
     queryFn: () => api.get<VotePayload>(`/api/vote/${code}/${viewSlide}`, headers),
     enabled: viewSlide !== null && !resultsMode && !!session?.active,
-    refetchInterval: (q) => (q.state.data?.open ? 4000 : false),
+    refetchInterval: (q) => (q.state.error ? 3000 : q.state.data?.open ? 4000 : false),
     retry: false,
   });
 
@@ -112,7 +112,8 @@ export function VotePage() {
     queryKey: ['voteResults', code, viewSlide],
     queryFn: () => api.get<VoteResultsResponse>(`/api/vote/${code}/${viewSlide}/results`, headers),
     enabled: viewSlide !== null && resultsMode,
-    refetchInterval: (q) => (q.state.data && !q.state.data.closed ? 2000 : false),
+    refetchInterval: (q) =>
+      q.state.error ? 3000 : q.state.data && !q.state.data.closed ? 2000 : false,
     retry: false,
   });
 
@@ -153,14 +154,12 @@ export function VotePage() {
   };
 
   // --- Состояния страницы ---
-  if (sessionQ.isLoading) {
-    return (
-      <Shell>
-        <div className="text-slate-400">Загрузка…</div>
-      </Shell>
-    );
-  }
-  if (sessionQ.isError) {
+  // «Не найдено» — только настоящий 404 сервера. Временные сбои (429/5xx/сеть) не убивают
+  // страницу: опрос состояния продолжается, при уже загруженных данных показываем их
+  // с плашкой «переподключаемся» (аудитория за одним Wi-Fi упирается в rate-limit).
+  const sessionNotFound = sessionQ.error instanceof ApiError && sessionQ.error.status === 404;
+
+  if (sessionNotFound) {
     return (
       <Shell>
         <div className="py-8 text-center">
@@ -174,11 +173,27 @@ export function VotePage() {
     );
   }
 
+  if (!session) {
+    return (
+      <Shell>
+        <div className="py-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <span className="flex h-4 w-4 animate-ping rounded-full bg-sky-500 opacity-75" />
+          </div>
+          <div className="font-medium text-slate-700">Подключаемся…</div>
+          <div className="mt-1 text-sm text-slate-400">
+            Если не получается долго — проверьте интернет и откройте ссылку заново
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
   // Итоги закрытого вопроса
   if (resultsMode && viewSlide !== null) {
     if (!resultsQ.data?.closed || !resultsQ.data.results) {
       return (
-        <Shell lectureTitle={session!.lectureTitle}>
+        <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
           <div className="py-10 text-center text-slate-400">
             <div className="mb-3 text-4xl">⏳</div>
             Вопрос закрыт, загружаем итоги…
@@ -188,7 +203,7 @@ export function VotePage() {
     }
     const results = resultsQ.data.results;
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
         <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">
           <MathText text={results.questionText} />
         </h1>
@@ -207,9 +222,9 @@ export function VotePage() {
   }
 
   // Активного вопроса нет — ожидание либо завершённая лекция
-  if (viewSlide === null || !session!.active) {
+  if (viewSlide === null || !session.active) {
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
         <div className="py-10 text-center">
           {session!.active ? (
             <>
@@ -236,7 +251,7 @@ export function VotePage() {
 
   if (payloadQ.isLoading || !payloadQ.data) {
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle}>
         <div className="text-slate-400">Загрузка вопроса…</div>
       </Shell>
     );
@@ -257,7 +272,7 @@ export function VotePage() {
 
   if (!question) {
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle}>
         <div className="py-8 text-center text-slate-500">На этом слайде нет вопроса</div>
       </Shell>
     );
@@ -266,7 +281,7 @@ export function VotePage() {
   // Ответ уже отправлен — подтверждение, пока вопрос открыт
   if (submitted || (payload.yourAnswer && payload.open)) {
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
         <div className="py-10 text-center">
           <div className="mb-3 text-5xl">✅</div>
           <div className="text-lg font-semibold text-slate-800">Ответ сохранён</div>
@@ -284,7 +299,7 @@ export function VotePage() {
 
   if (!payload.open) {
     return (
-      <Shell lectureTitle={session!.lectureTitle}>
+      <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
         <div className="py-10 text-center">
           <div className="mb-3 text-4xl">⏳</div>
           <div className="font-medium text-slate-700">Вопрос сейчас не активен</div>
@@ -298,7 +313,7 @@ export function VotePage() {
 
   // Форма активного вопроса
   return (
-    <Shell lectureTitle={session!.lectureTitle}>
+    <Shell lectureTitle={session.lectureTitle} offline={sessionQ.isError}>
       <h1 className="mb-1 text-xl font-bold leading-snug text-slate-900">
         <MathText text={question.questionText} />
       </h1>
@@ -365,7 +380,9 @@ export function VotePage() {
 
       {submit.isError && (
         <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {(submit.error as Error).message}
+          {submit.error instanceof ApiError && submit.error.status === 429
+            ? 'Слишком много запросов — попробуйте ещё раз через несколько секунд'
+            : (submit.error as Error).message}
         </div>
       )}
 
@@ -397,9 +414,23 @@ export function VotePage() {
   );
 }
 
-function Shell({ children, lectureTitle }: { children: React.ReactNode; lectureTitle?: string }) {
+function Shell({
+  children,
+  lectureTitle,
+  offline,
+}: {
+  children: React.ReactNode;
+  lectureTitle?: string;
+  /** Временная потеря связи с сервером: показываем последний контент и плашку ретрая */
+  offline?: boolean;
+}) {
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-6">
+      {offline && (
+        <div className="fixed left-1/2 top-2 z-50 -translate-x-1/2 rounded-full bg-amber-100 px-4 py-1 text-xs font-medium text-amber-800 shadow">
+          Нет связи с сервером — переподключаемся…
+        </div>
+      )}
       <div className="mx-auto max-w-lg">
         <div className="mb-4 flex items-center justify-between">
           <Logo />
