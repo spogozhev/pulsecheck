@@ -8,6 +8,12 @@ export const configFactory = () => ({
     ? path.resolve(process.cwd(), process.env.STORAGE_DIR)
     : path.resolve(process.cwd(), '../storage'),
   libreofficePath: process.env.LIBREOFFICE_PATH ?? 'soffice',
+  // Пошаговое разворачивание анимаций PPTX («появление по клику» → отдельные слайды)
+  // плагином ExpandAnimations. Требует: (1) EXPAND_ANIMATIONS=1, (2) библиотека расширения,
+  // установленная в профиль LIBREOFFICE_PROFILE_DIR (постоянный, не одноразовый).
+  // Без плагина/профиля — обычная конвертация (анимации схлопываются в финальный кадр).
+  expandAnimations: process.env.EXPAND_ANIMATIONS === '1',
+  libreofficeProfileDir: process.env.LIBREOFFICE_PROFILE_DIR ?? '',
   webOrigins: (process.env.WEB_ORIGIN ?? 'http://localhost:5180')
     .split(',')
     .map((s) => s.trim())

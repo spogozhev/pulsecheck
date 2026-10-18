@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -28,6 +28,8 @@ export const SLIDE_TARGET_WIDTH = 2560;
 export class ConverterService {
   private readonly logger = new Logger(ConverterService.name);
   private pdfLib: Promise<PdfToImg> | null = null;
+  // ExpandAnimations работает в постоянном профиле — параллельные soffice в нём запрещены
+  private expandQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly config: ConfigService) {}
 
@@ -38,24 +40,98 @@ export class ConverterService {
 
   /** Конвертирует PPTX в PDF, возвращает путь к полученному PDF. */
   async pptxToPdf(inputPath: string, workDir: string): Promise<string> {
-    const profileDir = await mkdtemp(path.join(tmpdir(), 'pulsecheck-lo-'));
-    const args = [
-      `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
-      '--headless',
-      '--norestore',
-      '--nologo',
-      '--nolockcheck',
-      '--nodefault',
-      '--convert-to',
-      'pdf',
-      '--outdir',
-      workDir,
-      inputPath,
-    ];
+    const profileDir = this.config.get<string>('libreofficeProfileDir');
+    if (this.config.get<boolean>('expandAnimations') && profileDir) {
+      try {
+        const pdf = await this.expandAnimationsToPdf(inputPath, workDir, profileDir);
+        this.logger.log('Анимации PPTX развёрнуты в отдельные слайды (ExpandAnimations)');
+        return pdf;
+      } catch (e) {
+        this.logger.warn(
+          `ExpandAnimations не сработал, конвертирую без разворачивания анимаций: ${(e as Error).message}`,
+        );
+      }
+    }
+    return this.plainPptxToPdf(inputPath, workDir);
+  }
 
+  /** Пошаговое разворачивание анимаций «по клику» плагином ExpandAnimations:
+   *  слайд с N щелчками превращается в N+1 статичных кадров. Макрос сам пишет
+   *  PDF рядом с копией входного файла и сам завершает LibreOffice. */
+  private expandAnimationsToPdf(inputPath: string, workDir: string, profileDir: string): Promise<string> {
+    const run = this.expandQueue.then(() => this.runExpandMacro(inputPath, workDir, profileDir));
+    this.expandQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runExpandMacro(inputPath: string, workDir: string, profileDir: string): Promise<string> {
+    const srcPath = path.join(workDir, 'anim-src.pptx');
+    await copyFile(inputPath, srcPath);
+    await rm(path.join(workDir, 'anim-src.pdf'), { force: true });
+
+    await this.runSoffice(
+      [
+        `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+        '--headless',
+        '--norestore',
+        '--nologo',
+        '--nolockcheck',
+        '--nodefault',
+        'macro:///ExpandAnimations.ExpandAnimations.CommandLine',
+      ],
+      { EXPANDANIMATIONS_INPUT: srcPath },
+    );
+
+    const pdfPath = path.join(workDir, 'anim-src.pdf');
+    try {
+      await access(pdfPath);
+    } catch {
+      throw new Error('макрос не создал PDF');
+    }
+    // развёрнутая копия ODP не нужна — только PDF
+    await rm(path.join(workDir, 'anim-src-expanded.odp'), { force: true });
+    return pdfPath;
+  }
+
+  private async plainPptxToPdf(inputPath: string, workDir: string): Promise<string> {
+    const profileDir = await mkdtemp(path.join(tmpdir(), 'pulsecheck-lo-'));
+    await this.runSoffice(
+      [
+        `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+        '--headless',
+        '--norestore',
+        '--nologo',
+        '--nolockcheck',
+        '--nodefault',
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        workDir,
+        inputPath,
+      ],
+      undefined,
+    );
+
+    const pdfPath = path.join(
+      workDir,
+      path.basename(inputPath, path.extname(inputPath)) + '.pdf',
+    );
+    try {
+      await access(pdfPath);
+    } catch {
+      throw new Error('LibreOffice не создал PDF-файл');
+    }
+    return pdfPath;
+  }
+
+  /** Запуск soffice с таймаутом; resolve при коде 0. */
+  private runSoffice(args: string[], env?: Record<string, string>): Promise<string> {
     const soffice = this.config.get<string>('libreofficePath')!;
-    const output = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(soffice, args, { windowsHide: true });
+    return new Promise<string>((resolve, reject) => {
+      const proc = spawn(soffice, args, {
+        windowsHide: true,
+        env: env ? { ...process.env, ...env } : process.env,
+      });
       let out = '';
       proc.stdout.on('data', (d) => (out += d.toString()));
       proc.stderr.on('data', (d) => (out += d.toString()));
@@ -73,18 +149,6 @@ export class ConverterService {
         else reject(new Error(`LibreOffice завершился с кодом ${code}: ${out.slice(-500)}`));
       });
     });
-    this.logger.log(`LibreOffice: ${output.trim().split('\n').slice(-1)[0]}`);
-
-    const pdfPath = path.join(
-      workDir,
-      path.basename(inputPath, path.extname(inputPath)) + '.pdf',
-    );
-    try {
-      await access(pdfPath);
-    } catch {
-      throw new Error('LibreOffice не создал PDF-файл');
-    }
-    return pdfPath;
   }
 
   /** Растеризует PDF в PNG-файлы вида 001.png, 002.png, ... в outDir.
